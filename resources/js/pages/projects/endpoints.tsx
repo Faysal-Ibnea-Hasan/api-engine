@@ -1,5 +1,14 @@
 import { Form, Head, Link, router, usePoll } from '@inertiajs/react';
-import { Info, Route as RouteIcon, TriangleAlert } from 'lucide-react';
+import {
+    CircleCheck,
+    CircleDashed,
+    CircleHelp,
+    FileCode,
+    Info,
+    ListChecks,
+    Route as RouteIcon,
+    TriangleAlert,
+} from 'lucide-react';
 import { useEffect } from 'react';
 import EndpointController from '@/actions/App/Http/Controllers/Discovery/EndpointController';
 import ProjectController from '@/actions/App/Http/Controllers/Projects/ProjectController';
@@ -135,21 +144,21 @@ export default function Endpoints({
         <>
             <Head title={`${project.name} API endpoints`} />
             <div className="flex w-full flex-col gap-4 p-4 md:p-6">
-                <div className="flex flex-wrap items-start gap-4">
-                    <Heading
-                        title="API endpoints"
-                        description={`Routes found in ${project.name}'s code, without running it.`}
-                    />
+                <Heading
+                    title="API endpoints"
+                    description={`Routes found in ${project.name}'s code, without running it.`}
+                    icon={RouteIcon}
+                >
                     {canScan &&
                         scan &&
                         !active &&
                         scan.status !== 'completed' &&
                         scan.status !== 'partial' && (
-                            <Button className="ml-auto" onClick={startScan}>
+                            <Button variant="secondary" onClick={startScan}>
                                 Retry discovery
                             </Button>
                         )}
-                </div>
+                </Heading>
 
                 <Alert variant="info" role="note">
                     <Info aria-hidden="true" />
@@ -238,20 +247,28 @@ export default function Endpoints({
                         scan.status === 'partial') &&
                     endpoints && (
                         <>
-                            <dl className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
-                                <div>
-                                    <dt className="text-muted-foreground">
+                            <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-5">
+                                <div className="rounded-lg border brand-gradient-border bg-card p-3">
+                                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <RouteIcon
+                                            aria-hidden="true"
+                                            className="size-3.5"
+                                        />
                                         Endpoints
                                     </dt>
-                                    <dd className="text-lg font-medium">
+                                    <dd className="brand-gradient-text text-xl font-semibold tabular-nums">
                                         {scan.endpointCount}
                                     </dd>
                                 </div>
-                                <div>
-                                    <dt className="text-muted-foreground">
+                                <div className="rounded-lg border brand-gradient-border bg-card p-3">
+                                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <CircleCheck
+                                            aria-hidden="true"
+                                            className="size-3.5"
+                                        />
                                         Resolved
                                     </dt>
-                                    <dd className="text-lg font-medium">
+                                    <dd className="brand-gradient-text text-xl font-semibold tabular-nums">
                                         {scan.resolvedCount}
                                         {scan.coverage !== null && (
                                             <span className="text-sm text-muted-foreground">
@@ -261,27 +278,39 @@ export default function Endpoints({
                                         )}
                                     </dd>
                                 </div>
-                                <div>
-                                    <dt className="text-muted-foreground">
+                                <div className="rounded-lg border brand-gradient-border bg-card p-3">
+                                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <CircleDashed
+                                            aria-hidden="true"
+                                            className="size-3.5"
+                                        />
                                         Partial
                                     </dt>
-                                    <dd className="text-lg font-medium">
+                                    <dd className="brand-gradient-text text-xl font-semibold tabular-nums">
                                         {scan.partialCount}
                                     </dd>
                                 </div>
-                                <div>
-                                    <dt className="text-muted-foreground">
+                                <div className="rounded-lg border brand-gradient-border bg-card p-3">
+                                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <CircleHelp
+                                            aria-hidden="true"
+                                            className="size-3.5"
+                                        />
                                         Unresolved
                                     </dt>
-                                    <dd className="text-lg font-medium">
+                                    <dd className="brand-gradient-text text-xl font-semibold tabular-nums">
                                         {scan.unresolvedCount}
                                     </dd>
                                 </div>
-                                <div>
-                                    <dt className="text-muted-foreground">
+                                <div className="rounded-lg border brand-gradient-border bg-card p-3">
+                                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <FileCode
+                                            aria-hidden="true"
+                                            className="size-3.5"
+                                        />
                                         Route files
                                     </dt>
-                                    <dd className="text-lg font-medium">
+                                    <dd className="brand-gradient-text text-xl font-semibold tabular-nums">
                                         {scan.fileCount}
                                     </dd>
                                 </div>
@@ -418,6 +447,7 @@ export default function Endpoints({
 
                             {endpoints.data.length === 0 ? (
                                 <EmptyState
+                                    icon={RouteIcon}
                                     title="No endpoints match"
                                     description="Try another search, method or group."
                                 />
@@ -532,6 +562,7 @@ export default function Endpoints({
                                     <Heading
                                         variant="small"
                                         title={`Findings (${scan.findingCount})`}
+                                        icon={ListChecks}
                                         description="Things the analyzer could not resolve or had to assume."
                                     />
                                     <ul className="divide-y rounded-lg border bg-card text-sm">

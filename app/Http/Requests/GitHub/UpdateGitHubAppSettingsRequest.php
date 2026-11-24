@@ -40,7 +40,13 @@ class UpdateGitHubAppSettingsRequest extends FormRequest
     {
         return [
             'app_id.regex' => __('The App ID is the number shown on the GitHub App page.'),
-            'slug.regex' => __('The slug is the last part of github.com/apps/<slug>.'),
+            'app_id.required' => __('Enter the App ID: the number under "About" on the GitHub App page.'),
+            'slug.required' => __('Enter the app slug: the last part of github.com/apps/<slug>.'),
+            'slug.regex' => __('The slug is the last part of github.com/apps/<slug> (letters, numbers and dashes, no spaces). It is not the display name.'),
+            'client_id.required' => __('Enter the Client ID shown on the GitHub App page (it starts with "Iv").'),
+            'client_id.regex' => __('The Client ID is the value shown on the GitHub App page (it starts with "Iv"), not the App ID or the secret.'),
+            'client_secret.required' => __('Generate a client secret on the GitHub App page and paste it here.'),
+            'private_key_file.max' => __('That file is too big for a private key. Upload the .pem file GitHub downloaded.'),
         ];
     }
 

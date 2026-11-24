@@ -1,5 +1,5 @@
-import { router, usePoll } from '@inertiajs/react';
-import { TriangleAlert } from 'lucide-react';
+import { router, usePage, usePoll } from '@inertiajs/react';
+import { Braces, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import AnalysisController from '@/actions/App/Http/Controllers/Analysis/AnalysisController';
 import {
@@ -12,6 +12,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
+import WorkflowPanel from '@/components/workflow-panel';
 import { cn } from '@/lib/utils';
 import type {
     AnalysisField,
@@ -37,6 +38,7 @@ const TABS = [
     'Errors',
     'Contract',
     'Validation',
+    'Workflow',
     'Evidence',
     'Unknowns',
 ] as const;
@@ -264,6 +266,7 @@ export default function EndpointAnalysis({
                 <Heading
                     variant="small"
                     title="Request and response contract"
+                    icon={Braces}
                     description="Read from the code without running it. Responses are what the code returns, not captured traffic."
                 />
                 {canRun && (
@@ -370,10 +373,13 @@ function AnalysisTabs({
     excerptLoading: boolean;
 }) {
     const contract = result.contract;
+    const workflowEnabled =
+        usePage().props.features?.advanced_analysis === true;
     // Payload/Response/Errors come from the followed contract (analyzer v6+); older results don't have it.
     const tabs = TABS.filter(
         (t) =>
             (t !== 'Evidence' || canViewSource) &&
+            (t !== 'Workflow' || workflowEnabled) &&
             (contract !== undefined ||
                 !['Payload', 'Response', 'Errors'].includes(t)),
     );
@@ -399,7 +405,7 @@ function AnalysisTabs({
                         className={cn(
                             '-mb-px border-b-2 px-3 py-1.5 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
                             tab === t
-                                ? 'border-primary font-medium'
+                                ? 'border-info font-medium'
                                 : 'border-transparent text-muted-foreground hover:text-foreground',
                         )}
                     >
@@ -647,6 +653,15 @@ function AnalysisTabs({
                             ))}
                         </ul>
                     ))}
+
+                {tab === 'Workflow' && workflowEnabled && (
+                    <WorkflowPanel
+                        projectId={projectId}
+                        analysisId={analysis.id}
+                        basic={result}
+                        canViewSource={canViewSource}
+                    />
+                )}
 
                 {tab === 'Evidence' && canViewSource && (
                     <div className="grid items-start gap-4 md:grid-cols-[minmax(16rem,0.9fr)_minmax(0,1.35fr)]">

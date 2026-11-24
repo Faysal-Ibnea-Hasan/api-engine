@@ -1,4 +1,11 @@
 import { Link, usePage } from '@inertiajs/react';
+import {
+    GitBranch,
+    Palette,
+    Settings,
+    ShieldCheck,
+    UserRound,
+} from 'lucide-react';
 import type { PropsWithChildren } from 'react';
 import Heading from '@/components/heading';
 import { Button } from '@/components/ui/button';
@@ -15,17 +22,17 @@ const sidebarNavItems: NavItem[] = [
     {
         title: 'Profile',
         href: edit(),
-        icon: null,
+        icon: UserRound,
     },
     {
         title: 'Security',
         href: editSecurity(),
-        icon: null,
+        icon: ShieldCheck,
     },
     {
         title: 'Appearance',
         href: editAppearance(),
-        icon: null,
+        icon: Palette,
     },
 ];
 
@@ -37,7 +44,11 @@ export default function SettingsLayout({ children }: PropsWithChildren) {
         auth.isPlatformAdmin && features.git_import
             ? [
                   ...sidebarNavItems,
-                  { title: 'GitHub App', href: editGitHubApp(), icon: null },
+                  {
+                      title: 'GitHub App',
+                      href: editGitHubApp(),
+                      icon: GitBranch,
+                  },
               ]
             : sidebarNavItems;
 
@@ -46,6 +57,7 @@ export default function SettingsLayout({ children }: PropsWithChildren) {
             <Heading
                 title="Settings"
                 description="Manage your profile and account settings"
+                icon={Settings}
             />
 
             <div className="flex flex-col gap-6 lg:flex-row">
@@ -63,7 +75,10 @@ export default function SettingsLayout({ children }: PropsWithChildren) {
                             >
                                 <Link href={item.href}>
                                     {item.icon && (
-                                        <item.icon className="h-4 w-4" />
+                                        <item.icon
+                                            aria-hidden="true"
+                                            className="size-4"
+                                        />
                                     )}
                                     {item.title}
                                 </Link>

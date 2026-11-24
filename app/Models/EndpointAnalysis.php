@@ -23,6 +23,7 @@ use Illuminate\Support\Carbon;
  * @property string $application_root
  * @property string $analyzer_version
  * @property string $schema_version
+ * @property string $profile basic | advanced (adds the workflow graph)
  * @property string $analysis_key
  * @property RunStatus $status
  * @property int $attempts
@@ -47,6 +48,9 @@ class EndpointAnalysis extends Model
 {
     /** @use HasFactory<EndpointAnalysisFactory> */
     use BelongsToWorkspace, HasFactory, HasUuids;
+
+    /** @var array<string, mixed> */
+    protected $attributes = ['profile' => 'basic'];
 
     protected function casts(): array
     {
@@ -86,6 +90,12 @@ class EndpointAnalysis extends Model
     public function evidence(): HasMany
     {
         return $this->hasMany(AnalysisEvidence::class);
+    }
+
+    /** @return HasMany<ApiDependency, $this> */
+    public function dependencies(): HasMany
+    {
+        return $this->hasMany(ApiDependency::class);
     }
 
     /** @return HasMany<AnalysisFinding, $this> */

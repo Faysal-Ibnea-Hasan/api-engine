@@ -306,7 +306,7 @@ export default function ZipUpload({
                 }}
                 className={cn(
                     'flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed p-6 text-center text-sm has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50',
-                    dragging && 'border-primary bg-muted/50',
+                    dragging && 'border-info bg-muted/50',
                     busy && 'pointer-events-none opacity-60',
                 )}
             >

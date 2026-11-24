@@ -1,5 +1,11 @@
 import { Form, Head, Link, router } from '@inertiajs/react';
-import { Upload } from 'lucide-react';
+import {
+    Archive,
+    FolderKanban,
+    PencilLine,
+    Upload,
+    Wrench,
+} from 'lucide-react';
 import { useState } from 'react';
 import ProjectController from '@/actions/App/Http/Controllers/Projects/ProjectController';
 import ProjectWizardController from '@/actions/App/Http/Controllers/Projects/ProjectWizardController';
@@ -69,27 +75,13 @@ export default function ShowProject({
         <>
             <Head title={project.name} />
             <div className="flex w-full flex-col gap-4 p-4 md:p-6">
-                <div className="flex flex-wrap items-start gap-4">
-                    <div className="space-y-2">
-                        <Heading
-                            title={project.name}
-                            description={project.description ?? undefined}
-                        />
-                        <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                            <code className="min-w-0 font-mono text-code break-all">
-                                {project.slug}
-                            </code>
-                            <ProjectStatusBadge
-                                status={project.status}
-                                visibility={project.visibility}
-                            />
-                            {project.creator && (
-                                <span>Created by {project.creator}</span>
-                            )}
-                        </div>
-                    </div>
+                <Heading
+                    title={project.name}
+                    description={project.description ?? undefined}
+                    icon={FolderKanban}
+                >
                     {editable && !project.setupComplete && (
-                        <Button asChild className="ml-auto">
+                        <Button asChild variant="secondary">
                             <Link
                                 href={ProjectWizardController.edit({
                                     project: project.id,
@@ -99,6 +91,19 @@ export default function ShowProject({
                                 Continue setup
                             </Link>
                         </Button>
+                    )}
+                </Heading>
+
+                <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                    <code className="min-w-0 font-mono text-code break-all">
+                        {project.slug}
+                    </code>
+                    <ProjectStatusBadge
+                        status={project.status}
+                        visibility={project.visibility}
+                    />
+                    {project.creator && (
+                        <span>Created by {project.creator}</span>
                     )}
                 </div>
 
@@ -111,7 +116,7 @@ export default function ShowProject({
 
                 <section className="flex flex-col gap-3">
                     <div className="flex items-center gap-2">
-                        <Heading variant="small" title="Setup" />
+                        <Heading variant="small" title="Setup" icon={Wrench} />
                         {editable && project.setupComplete && (
                             <Button
                                 variant="link"
@@ -168,7 +173,7 @@ export default function ShowProject({
                             project: project.id,
                             snapshot: framework.snapshotId,
                         })}
-                        className="block rounded-lg border bg-card p-4 text-sm transition-[border-color,box-shadow] outline-none hover:border-primary/40 hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                        className="block rounded-lg border brand-gradient-border bg-card p-4 text-sm transition-[border-color,box-shadow] outline-none hover:border-info/40 hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     >
                         {(() => {
                             const d = framework.detection;
@@ -196,7 +201,7 @@ export default function ShowProject({
                 {endpoints?.scan && (
                     <Link
                         href={EndpointController.index(project.id)}
-                        className="block rounded-lg border bg-card p-4 text-sm transition-[border-color,box-shadow] outline-none hover:border-primary/40 hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                        className="block rounded-lg border brand-gradient-border bg-card p-4 text-sm transition-[border-color,box-shadow] outline-none hover:border-info/40 hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     >
                         {endpoints.scan.active
                             ? 'Discovering API routes…'
@@ -228,7 +233,11 @@ export default function ShowProject({
 
                 {editable && (
                     <section className="flex flex-col gap-3">
-                        <Heading variant="small" title="Edit details" />
+                        <Heading
+                            variant="small"
+                            title="Edit details"
+                            icon={PencilLine}
+                        />
                         <Form
                             {...ProjectController.update.form(project.id)}
                             options={{ preserveScroll: true }}
@@ -316,6 +325,7 @@ export default function ShowProject({
                         <Heading
                             variant="small"
                             title={archived ? 'Restore' : 'Archive'}
+                            icon={Archive}
                         />
                         {archived ? (
                             <Button

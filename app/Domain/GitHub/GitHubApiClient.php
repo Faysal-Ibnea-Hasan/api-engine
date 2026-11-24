@@ -70,6 +70,7 @@ final class GitHubApiClient
     {
         try {
             $response = $this->pending(null, (int) config('github.http_timeout_seconds'))
+                ->accept('application/json') // otherwise GitHub answers form-encoded
                 ->asForm()
                 ->post(rtrim((string) config('github.web_url'), '/').'/login/oauth/access_token', [
                     'client_id' => $settings->client_id,
@@ -134,7 +135,9 @@ final class GitHubApiClient
     private function send(PendingRequest $request, string $method, string $url, array $data, array $codes, bool $allowRedirect = false): Response
     {
         try {
-            $response = $request->send($method, $url, $method === 'GET' ? ['query' => $data] : ['json' => $data]);
+            // An empty 'query' option would wipe the URL's own query string (e.g. codeload's signed ?token=).
+            $options = $data === [] ? [] : ($method === 'GET' ? ['query' => $data] : ['json' => $data]);
+            $response = $request->send($method, $url, $options);
         } catch (ConnectionException) {
             throw GitHubError::of('github.provider_unavailable'); // its message names the URL: never report it
         }

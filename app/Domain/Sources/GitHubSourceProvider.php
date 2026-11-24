@@ -47,7 +47,7 @@ final class GitHubSourceProvider implements SourceProvider
             throw GitHubError::of('github.permission_revoked'); // disconnected: history stays, new pulls stop
         }
 
-        GitHubRepositories::refresh($source, $this->repositories->fetch($installation, $source->github_repository_id));
+        GitHubRepositories::refresh($source, $this->repositories->fetch($installation, $source->github_repository_id, $project->workspace_id));
         $refType = (string) ($configuration['ref_type'] ?? 'default');
         $commit = $this->repositories->resolve($source, $refType, $configuration['ref'] ?? null);
         $source->forceFill(['tracked_ref_type' => $refType, 'tracked_ref' => $commit['ref']])->save();

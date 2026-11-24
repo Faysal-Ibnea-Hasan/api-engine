@@ -1,5 +1,12 @@
 import { Head, Link, usePage } from '@inertiajs/react';
-import { Building2, FolderKanban, Settings, Users } from 'lucide-react';
+import {
+    Building2,
+    FolderKanban,
+    History,
+    LayoutGrid,
+    Settings,
+    Users,
+} from 'lucide-react';
 import ProjectController from '@/actions/App/Http/Controllers/Projects/ProjectController';
 import WorkspaceController from '@/actions/App/Http/Controllers/Workspaces/WorkspaceController';
 import WorkspaceMemberController from '@/actions/App/Http/Controllers/Workspaces/WorkspaceMemberController';
@@ -12,8 +19,11 @@ import { dashboard } from '@/routes';
 import { edit } from '@/routes/profile';
 import type { ProjectSummary } from '@/types';
 
+const iconTile =
+    'flex size-8 shrink-0 items-center justify-center rounded-md brand-gradient text-gradient-foreground';
+
 const tile =
-    'flex flex-col gap-1 rounded-lg border bg-card p-4 transition-[border-color,box-shadow] outline-none hover:border-primary/40 hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50';
+    'flex flex-col gap-2 rounded-lg border bg-card p-4 brand-gradient-border transition-[border-color,box-shadow] outline-none hover:border-info/40 hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 export default function Dashboard({
     recentProjects,
@@ -53,17 +63,20 @@ export default function Dashboard({
                     <Heading
                         title={currentWorkspace.name}
                         description={`Your role: ${currentWorkspace.roleLabel}`}
+                        icon={LayoutGrid}
                     />
                 ) : (
-                    <Heading title="Dashboard" />
+                    <Heading title="Dashboard" icon={LayoutGrid} />
                 )}
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {currentWorkspace && features.project_wizard && (
                         <Link href={ProjectController.index()} className={tile}>
-                            <FolderKanban
-                                aria-hidden="true"
-                                className="size-5 text-primary"
-                            />
+                            <span className={iconTile}>
+                                <FolderKanban
+                                    aria-hidden="true"
+                                    className="size-4"
+                                />
+                            </span>
                             <span className="text-sm font-medium">
                                 Projects
                             </span>
@@ -79,10 +92,9 @@ export default function Dashboard({
                             )}
                             className={tile}
                         >
-                            <Users
-                                aria-hidden="true"
-                                className="size-5 text-primary"
-                            />
+                            <span className={iconTile}>
+                                <Users aria-hidden="true" className="size-4" />
+                            </span>
                             <span className="text-sm font-medium">Members</span>
                             <span className="text-xs text-muted-foreground">
                                 Who has access, and invitations.
@@ -90,10 +102,9 @@ export default function Dashboard({
                         </Link>
                     )}
                     <Link href={edit()} className={tile}>
-                        <Settings
-                            aria-hidden="true"
-                            className="size-5 text-primary"
-                        />
+                        <span className={iconTile}>
+                            <Settings aria-hidden="true" className="size-4" />
+                        </span>
                         <span className="text-sm font-medium">Settings</span>
                         <span className="text-xs text-muted-foreground">
                             Your profile, security and appearance.
@@ -103,7 +114,11 @@ export default function Dashboard({
                 {recentProjects && (
                     <section className="flex flex-col gap-3">
                         <div className="flex items-center justify-between gap-3">
-                            <Heading variant="small" title="Recent projects" />
+                            <Heading
+                                variant="small"
+                                title="Recent projects"
+                                icon={History}
+                            />
                             <TextLink
                                 href={ProjectController.index()}
                                 className="text-sm"

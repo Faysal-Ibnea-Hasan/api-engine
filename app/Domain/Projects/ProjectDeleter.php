@@ -7,6 +7,7 @@ use App\Domain\Audit\AuditLog;
 use App\Domain\Discovery\RouteScans;
 use App\Domain\Sources\RunStatus;
 use App\Domain\Sources\SnapshotImporter;
+use App\Models\ApiDependency;
 use App\Models\ApiEndpoint;
 use App\Models\DocumentationVersion;
 use App\Models\EndpointAnalysis;
@@ -71,6 +72,7 @@ final class ProjectDeleter
             }
 
             DocumentationVersion::query()->where('project_id', $project->id)->delete();  // before analyses: they restrict deletes
+            ApiDependency::query()->where('project_id', $project->id)->delete();
             EndpointAnalysis::query()->where('project_id', $project->id)->delete();      // evidence and findings cascade
             $scans = RouteScan::query()->where('project_id', $project->id)->pluck('id');
             ApiEndpoint::query()->whereIn('route_scan_id', $scans)->delete();           // findings cascade with scans

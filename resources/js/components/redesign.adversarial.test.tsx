@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FolderKanban } from 'lucide-react';
 import type { ComponentProps, ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -8,6 +9,10 @@ import { AppSidebar } from '@/components/app-sidebar';
 import AppLogo from '@/components/app-logo';
 import { Breadcrumbs } from '@/components/breadcrumbs';
 import { ResponseList } from '@/components/contract-views';
+import EmptyState from '@/components/empty-state';
+import { GitHubAppSetupGuide } from '@/components/github-guides';
+import Heading from '@/components/heading';
+import { ImpersonationBanner } from '@/components/impersonation-banner';
 import ImportStatus from '@/components/import-status';
 import MethodBadge from '@/components/method-badge';
 import { NavUser } from '@/components/nav-user';
@@ -25,6 +30,7 @@ import { UserInfo } from '@/components/user-info';
 import { WorkspaceSwitcher } from '@/components/workspace-switcher';
 import { useInitials } from '@/hooks/use-initials';
 import AuthSimpleLayout from '@/layouts/auth/auth-simple-layout';
+import SettingsLayout from '@/layouts/settings/layout';
 import ShowDocumentation from '@/pages/projects/documentation';
 import ShowEndpoint from '@/pages/projects/endpoint';
 import Endpoints from '@/pages/projects/endpoints';
@@ -1601,5 +1607,788 @@ describe('Adversary chunk 3 rev10: HTML-like names and slugs render as text', ()
 
         expect(html).not.toContain('<script>');
         expect(html).toMatch(/href="\/projects\/[^"]*"/);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Chunk 3b adversarial tests: gradient hero, icons, gradient utilities, the
+// tailwind-merge interaction on Button, dark tokens, gradient leaks, and the
+// outside impersonation / GitHub / settings screens.
+
+const HERO_RE =
+    /<header\b([^>]*\bdata-slot="page-hero"[^>]*)>([\s\S]*?)<\/header>/g;
+const heroes = (html: string) => [...html.matchAll(HERO_RE)];
+const oneHero = (html: string) => {
+    const h = heroes(html);
+
+    expect(h, 'page-hero count').toHaveLength(1);
+
+    return { tag: `<header${h[0][1]}>`, body: h[0][2], whole: h[0][0] };
+};
+
+// ProjectDetailsRules: description max 2000, no character rule.
+const LONG_WORD = 'D'.repeat(250);
+const ROUTE_NAME = `api.v1.${'n'.repeat(250)}`;
+
+const GRADIENT_TOKEN =
+    /^(?:\S*:)?(?:brand-gradient(?:-text|-border)?|page-gradient)$/;
+
+/**
+ * Static-markup port of the AC47 element whitelist: every opening tag with a
+ * gradient token must be one of the allowed kinds. Returns the offenders.
+ */
+function gradientLeaks(html: string) {
+    const leaks: string[] = [];
+
+    for (const m of html.matchAll(/<([a-z][a-z0-9]*)\b[^>]*>/g)) {
+        const [tag, name] = m;
+        const t = tokensOfTag(tag);
+
+        if (!t.some((x) => GRADIENT_TOKEN.test(x))) {
+            continue;
+        }
+
+        const before = html.slice(0, m.index);
+        const after = html.slice(m.index! + tag.length);
+        const insideDl =
+            before.lastIndexOf('<dl') > before.lastIndexOf('</dl>') &&
+            /(?:<dl\b[^>]*>|<\/div>)$/.test(before);
+        const ulAt = before.lastIndexOf('<ul');
+        const inDensityList =
+            ulAt > before.lastIndexOf('</ul>') &&
+            /^<ul\b[^>]*class="[^"]*\bdivide-y\b/.test(before.slice(ulAt));
+        const allowed =
+            (name === 'header' && tag.includes('data-slot="page-hero"')) ||
+            (tag.includes('data-slot="button"') && t.includes('bg-primary')) ||
+            ((name === 'span' || name === 'div') &&
+                t.includes('brand-gradient') &&
+                (t.includes('size-8') || t.includes('size-10')) &&
+                new RegExp(
+                    `^<svg\\b[^>]*>(?:(?!<svg\\b)[\\s\\S])*?</svg></${name}>`,
+                ).test(after)) ||
+            (t.includes('brand-gradient-border') &&
+                !t.includes('brand-gradient') &&
+                ((name === 'a' && !inDensityList) ||
+                    (name === 'div' && insideDl))) ||
+            (name === 'dd' && t.includes('brand-gradient-text'));
+
+        if (!allowed) {
+            leaks.push(tag);
+        }
+    }
+
+    return leaks;
+}
+
+const impersonation = (
+    over: Partial<{
+        member: string;
+        email: string;
+        workspace: string;
+        owner: string;
+    }> = {},
+) => ({
+    active: true,
+    startedAt: '2026-11-24T00:00:00Z',
+    owner: { id: 1, name: over.owner ?? 'Olivia Owner' },
+    member: {
+        id: 2,
+        name: over.member ?? 'Vic Viewer',
+        email: over.email ?? 'vic@example.test',
+    },
+    workspace: { id: 'w1', name: over.workspace ?? 'Acme' },
+});
+
+const renderBanner = (imp: ReturnType<typeof impersonation>) => {
+    page.props = { ...page.props, impersonation: imp };
+
+    return renderToStaticMarkup(<ImpersonationBanner />);
+};
+
+const renderSettings = (isPlatformAdmin: boolean, gitImport: boolean) => {
+    page.props = {
+        ...page.props,
+        auth: { user: user(), isPlatformAdmin },
+        features: { ...(page.props.features as object), git_import: gitImport },
+    };
+
+    return renderToStaticMarkup(
+        <SettingsLayout>
+            <p>child</p>
+        </SettingsLayout>,
+    );
+};
+
+const finding = {
+    severity: 'warning',
+    code: 'dynamic_uri',
+    message: 'URI is built at runtime.',
+    source: { path: 'routes/api.php', line: 3, expression: 'Route::get($x)' },
+};
+
+describe('Adversary chunk 3b: hero description with long unbroken data', () => {
+    // The hero text block is min-w-48 and the inset is overflow-x-clip, so an
+    // unbroken description runs past the banner: near-white text on the page.
+    it.each([
+        [
+            'Heading itself',
+            () =>
+                renderToStaticMarkup(
+                    <Heading title="T" description={LONG_WORD} />,
+                ),
+            LONG_WORD,
+        ],
+        [
+            'show.tsx project.description',
+            () =>
+                renderShow({
+                    project: projectDetail({ description: LONG_WORD }),
+                }),
+            LONG_WORD,
+        ],
+        [
+            'endpoint.tsx route name',
+            () =>
+                renderEndpoint({ endpoint: endpointRow({ name: ROUTE_NAME }) }),
+            ROUTE_NAME,
+        ],
+        [
+            'documentation.tsx project name',
+            () => renderDocs({ project: { id: 'p1', name: NAME } }),
+            NAME,
+        ],
+        [
+            'endpoints.tsx project name',
+            () => renderEndpoints({ project: { id: 'p1', name: NAME } }),
+            NAME,
+        ],
+    ])('%s: the hero description p wraps (major)', (_, render, text) => {
+        const html = render();
+        const hero = oneHero(html);
+
+        expect(hero.body).toContain(text);
+        expectOneOf(openTagBefore(hero.body, text, 'p'), WRAPS);
+    });
+
+    it('show.tsx: a 120-char unbroken project name wraps in the hero h2 (guard)', () => {
+        const hero = oneHero(
+            renderShow({ project: projectDetail({ name: NAME }) }),
+        );
+
+        expectOneOf(openTagBefore(hero.body, NAME, 'h2'), ['wrap-anywhere']);
+        expectOneOf(openTagBefore(hero.body, NAME, 'div'), ['min-w-48']);
+    });
+});
+
+describe('Adversary chunk 3b: HTML-like strings in the hero render as text', () => {
+    it.each(XSS)('show.tsx name and description: %s', (p) => {
+        const html = renderShow({
+            project: projectDetail({ name: p, description: p }),
+        });
+
+        expectEscaped(oneHero(html).body, p);
+    });
+
+    it.each(XSS)('endpoint.tsx uri and route name: %s', (p) => {
+        const html = renderEndpoint({
+            endpoint: endpointRow({ uri: p, name: p }),
+        });
+
+        expectEscaped(oneHero(html).body, p);
+    });
+
+    it.each(XSS)(
+        'documentation.tsx project name in the description: %s',
+        (p) => {
+            expectEscaped(
+                oneHero(renderDocs({ project: { id: 'p1', name: p } })).body,
+                p,
+            );
+        },
+    );
+
+    it.each(XSS)('dashboard workspace name and role label: %s', async (p) => {
+        const { default: Dashboard } = await import('@/pages/dashboard');
+        const ws = workspace('w1', p, p);
+        page.props = {
+            ...page.props,
+            workspaces: [ws],
+            currentWorkspace: ws,
+            features: { project_wizard: true, workspace_management: true },
+        };
+
+        const html = renderToStaticMarkup(<Dashboard recentProjects={[]} />);
+
+        expectEscaped(oneHero(html).body, p);
+    });
+});
+
+describe('Adversary chunk 3b: Heading hero shapes', () => {
+    it('no icon: no tile and no svg in the hero (guard)', () => {
+        const hero = oneHero(renderToStaticMarkup(<Heading title="T" />));
+
+        expect(hero.body).not.toContain('<svg');
+        expect(hero.body).not.toContain('<span');
+        expect(hero.body).not.toContain('<p');
+    });
+
+    it('icon: exactly one hidden svg in a non-gradient tile (guard)', () => {
+        const hero = oneHero(
+            renderToStaticMarkup(<Heading title="T" icon={FolderKanban} />),
+        );
+        const svgs = [...hero.body.matchAll(/<svg\b[^>]*>/g)];
+
+        expect(svgs).toHaveLength(1);
+        expect(svgs[0][0]).toContain('aria-hidden="true"');
+        expect(gradientLeaks(hero.body)).toEqual([]);
+    });
+
+    it.each([false, null, undefined])(
+        'children=%s: nothing follows the text block (guard)',
+        (c) => {
+            const hero = oneHero(
+                renderToStaticMarkup(<Heading title="T">{c}</Heading>),
+            );
+
+            expect(hero.body).toMatch(/<\/h2><\/div>$/);
+        },
+    );
+
+    it('small variant with an icon: no page-hero, no gradient token (guard)', () => {
+        const html = renderToStaticMarkup(
+            <Heading
+                variant="small"
+                title="T"
+                description="D"
+                icon={FolderKanban}
+            />,
+        );
+
+        expect(html).not.toContain('page-hero');
+        expect(gradientLeaks(html)).toEqual([]);
+        expect(html).not.toMatch(/gradient/);
+    });
+
+    it('small variant keeps its children instead of dropping them (minor)', () => {
+        const html = renderToStaticMarkup(
+            <Heading variant="small" title="T">
+                <button type="button">Act</button>
+            </Heading>,
+        );
+
+        expect(html).toContain('>Act</button>');
+    });
+
+    it('every Heading that takes children is a page hero, not small (guard)', () => {
+        const calls = filesMatching(/<\/Heading>/).flatMap((f) =>
+            [
+                ...fs
+                    .readFileSync(path.join(JS_DIR, f), 'utf8')
+                    .matchAll(/<Heading\b([^>]*?)>(?!\s*\/)/g),
+            ]
+                .filter((m) => !m[0].endsWith('/>'))
+                .map((m) => `${f}: ${m[1].replace(/\s+/g, ' ')}`),
+        );
+
+        expect(calls.length).toBeGreaterThan(0);
+        expect(calls.filter((c) => c.includes('variant="small"'))).toEqual([]);
+    });
+});
+
+describe('Adversary chunk 3b: tailwind-merge drops bg-primary but keeps brand-gradient', () => {
+    // AC47 whitelist kind 2 and the AC20 selector identify the gradient button
+    // by its bg-primary token. No live default-variant caller passes bg-* yet.
+    it.each(['bg-destructive', 'bg-transparent', 'bg-card'])(
+        'default Button with className="%s" has no gradient without bg-primary (minor)',
+        (bg) => {
+            const t = tokensOfTag(
+                renderToStaticMarkup(<Button className={bg}>X</Button>),
+            );
+
+            expect(t).toContain(bg);
+            expect(
+                t.includes('brand-gradient') && !t.includes('bg-primary'),
+                t.join(' '),
+            ).toBe(false);
+        },
+    );
+
+    it('a layout-only className keeps solid bg-primary and no gradient (guard, revision 12)', () => {
+        const t = tokensOfTag(
+            renderToStaticMarkup(<Button className="ml-auto w-full">X</Button>),
+        );
+
+        expect(t).toEqual(
+            expect.arrayContaining([
+                'bg-primary',
+                'text-primary-foreground',
+                'ml-auto',
+            ]),
+        );
+        expect(t.filter((c) => /gradient/.test(c))).toEqual([]);
+    });
+
+    it.each(['bg-destructive', 'bg-card'])(
+        'a caller %s cleanly replaces bg-primary: one bg colour, no gradient (guard, revision 12)',
+        (bg) => {
+            const t = tokensOfTag(
+                renderToStaticMarkup(<Button className={bg}>X</Button>),
+            );
+
+            expect(t.filter((c) => c.startsWith('bg-'))).toEqual([bg]);
+            expect(t.filter((c) => /gradient/.test(c))).toEqual([]);
+        },
+    );
+
+    it('no live default-variant Button passes a bg-* className (white text would sit on it) (guard)', () => {
+        const hits = filesMatching(/<Button\b/).flatMap((f) =>
+            [
+                ...fs
+                    .readFileSync(path.join(JS_DIR, f), 'utf8')
+                    .matchAll(/<Button\b([^>]*)>/g),
+            ]
+                .map((m) => m[1])
+                .filter(
+                    (a) =>
+                        !/\bvariant=/.test(a) &&
+                        /className=[^]*?(?<![\w:-])bg-/.test(a),
+                )
+                .map((a) => `${f}: ${a.replace(/\s+/g, ' ')}`),
+        );
+
+        expect(hits.filter((h) => !h.includes('.test.'))).toEqual([]);
+    });
+
+    it.each(['destructive', 'outline', 'secondary', 'ghost', 'link'] as const)(
+        '%s variant gets no gradient even with a bg className (guard)',
+        (variant) => {
+            const html = renderToStaticMarkup(
+                <Button variant={variant} className="bg-primary">
+                    X
+                </Button>,
+            );
+
+            expect(html).not.toMatch(/gradient/);
+        },
+    );
+});
+
+describe('Adversary chunk 3b: dark mode token gaps', () => {
+    const css = readRoot('resources/css/app.css');
+    const block = (selector: string) => {
+        const at = css.search(new RegExp(`^${selector} \\{`, 'm'));
+
+        expect(at, selector).toBeGreaterThan(-1);
+
+        return css.slice(at, css.indexOf('\n}', at));
+    };
+    const decl = (b: string, name: string) =>
+        b
+            .match(new RegExp(`\\s${name}:\\s*([^;]+);`))?.[1]
+            .replace(/\s+/g, ' ');
+    const root = block(':root');
+    const dark = block('\\.dark');
+
+    it.each([
+        '--gradient-from',
+        '--gradient-to',
+        '--gradient-foreground',
+        '--page-from',
+        '--page-to',
+    ])('%s is declared in :root and .dark (guard)', (name) => {
+        expect(decl(root, name)).toBeTruthy();
+        expect(decl(dark, name)).toBeTruthy();
+    });
+
+    it('primary button text is white in both modes; hero text is --gradient-foreground, which equals it in light only (guard, revision 12)', () => {
+        // Spec palette: --primary-foreground oklch(1 0 0) both modes; dark
+        // --gradient-foreground is the dark text oklch(0.1763 0.014 258.41).
+        for (const b of [root, dark]) {
+            expect(decl(b, '--primary-foreground')).toBe('oklch(1 0 0)');
+        }
+        expect(decl(root, '--gradient-foreground')).toBe(
+            decl(root, '--primary-foreground'),
+        );
+        expect(decl(dark, '--gradient-foreground')).not.toBe(
+            decl(dark, '--primary-foreground'),
+        );
+        expect(
+            tokensOfTag(
+                oneHero(renderToStaticMarkup(<Heading title="T" />)).tag,
+            ),
+        ).toContain('text-gradient-foreground');
+    });
+
+    it('every var() in the gradient utilities is declared in :root (guard)', () => {
+        const bodies = [...css.matchAll(/@utility [\w-]+ \{([^}]*)\}/g)]
+            .map((m) => m[1])
+            .join('\n');
+        const used = [...bodies.matchAll(/var\((--[\w-]+)\)/g)].map(
+            (m) => m[1],
+        );
+
+        expect(used.length).toBeGreaterThan(0);
+
+        for (const v of used) {
+            expect(decl(root, v), v).toBeTruthy();
+        }
+    });
+
+    it('.dark is only ever applied to <html>, so :root-only --brand-gradient resolves per mode (guard)', () => {
+        const togglers = filesMatching(
+            /classList\.(?:add|toggle)\(\s*['"]dark['"]/,
+        );
+
+        expect(togglers).toEqual(['hooks/use-appearance.tsx']);
+        expect(
+            fs.readFileSync(
+                path.join(JS_DIR, 'hooks/use-appearance.tsx'),
+                'utf8',
+            ),
+        ).toMatch(/document\.documentElement\.classList\.toggle\(\s*'dark'/);
+        expect(
+            filesMatching(/className=["'`][^"'`]*(?<![\w:/-])dark(?![\w:/-])/),
+        ).toEqual([]);
+        expect(readRoot('resources/views/app.blade.php')).toMatch(
+            /<html\b.*@class\(\['dark'/,
+        );
+    });
+});
+
+describe('Adversary chunk 3b: no gradient leaks onto rows, panels or badges', () => {
+    it.each([
+        [
+            'show (setup unfinished, owner)',
+            () =>
+                renderShow({
+                    project: projectDetail({ setupComplete: false }),
+                }),
+        ],
+        [
+            'endpoints (completed, rows and findings)',
+            () =>
+                renderEndpoints({
+                    scan: { ...scanSummary, findingCount: 1, partialCount: 1 },
+                    findings: [finding],
+                    endpoints: {
+                        data: [
+                            endpointRow(),
+                            endpointRow({ id: 'e2', resolution: 'partial' }),
+                        ],
+                        current_page: 1,
+                        last_page: 1,
+                        total: 2,
+                        prev_page_url: null,
+                        next_page_url: null,
+                    },
+                }),
+        ],
+        [
+            'endpoints (no rows: EmptyState)',
+            () =>
+                renderEndpoints({
+                    endpoints: {
+                        data: [],
+                        current_page: 1,
+                        last_page: 1,
+                        total: 0,
+                        prev_page_url: null,
+                        next_page_url: null,
+                    },
+                }),
+        ],
+        [
+            'endpoints (failed scan, Retry in hero)',
+            () =>
+                renderEndpoints({ scan: { ...scanSummary, status: 'failed' } }),
+        ],
+        [
+            'endpoint detail',
+            () =>
+                renderEndpoint({
+                    endpoint: endpointRow({
+                        resolution: 'partial',
+                        reasons: ['dynamic'],
+                        source: {
+                            path: 'routes/api.php',
+                            line: 1,
+                            expression: 'Route::get()',
+                        },
+                    }),
+                }),
+        ],
+        ['documentation', () => renderDocs()],
+        [
+            'projects cards',
+            () => renderCards([summary(), summary({ id: 'x2' })]),
+        ],
+        ['impersonation banner', () => renderBanner(impersonation())],
+        [
+            'GitHub App setup guide',
+            () =>
+                renderToStaticMarkup(
+                    <GitHubAppSetupGuide
+                        configured={false}
+                        urls={{
+                            homepage: 'https://h',
+                            callback: 'https://c',
+                            newApp: 'https://n',
+                        }}
+                    />,
+                ),
+        ],
+        ['settings layout (admin)', () => renderSettings(true, true)],
+        [
+            'EmptyState',
+            () =>
+                renderToStaticMarkup(
+                    <EmptyState icon={FolderKanban} title="X" />,
+                ),
+        ],
+    ])(
+        '%s: every gradient element is a whitelisted kind (guard)',
+        (_, render) => {
+            expect(gradientLeaks(render())).toEqual([]);
+        },
+    );
+
+    it('the whitelist port flags a gradient row, row link, panel and two-svg tile (self-test)', () => {
+        expect(
+            gradientLeaks(
+                '<ul><li class="brand-gradient-border px-3">r</li></ul>' +
+                    '<section class="brand-gradient">p</section>' +
+                    '<span class="brand-gradient size-8"><svg></svg><svg></svg></span>' +
+                    '<div class="data-[x]:before:brand-gradient">n</div>' +
+                    '<ul class="divide-y"><li><a class="brand-gradient-border">r</a></li></ul>',
+            ),
+        ).toHaveLength(5);
+    });
+
+    it('dashboard: every gradient element is a whitelisted kind (guard)', async () => {
+        expect(gradientLeaks(await renderDashboard([summary()]))).toEqual([]);
+    });
+
+    it.each([
+        ['endpoint detail', () => renderEndpoint()],
+        ['show', () => renderShow()],
+    ])('%s: badges stay out of the hero (guard)', (_, render) => {
+        const hero = oneHero(render());
+
+        expect(hero.body).not.toMatch(/data-slot="(?:method-)?badge"/);
+    });
+});
+
+describe('Adversary chunk 3b: moved hero actions keep their behavior', () => {
+    const actions = (body: string) =>
+        [...body.matchAll(/<(a|button)\b[^>]*>/g)].map((m) => m[0]);
+
+    it.each([
+        ['projects index', () => renderCards([summary()]), 'Create project'],
+        [
+            'show',
+            () =>
+                renderShow({
+                    project: projectDetail({ setupComplete: false }),
+                }),
+            'Continue setup',
+        ],
+        ['documentation', () => renderDocs(), 'Regenerate'],
+        [
+            'endpoints',
+            () =>
+                renderEndpoints({ scan: { ...scanSummary, status: 'failed' } }),
+            'Retry discovery',
+        ],
+    ])(
+        '%s: the hero action is secondary, not gradient (guard)',
+        (_, render, text) => {
+            const hero = oneHero(render());
+            const a = actions(hero.body);
+
+            expect(a).toHaveLength(1);
+            expect(hero.body).toContain(text);
+
+            const t = tokensOfTag(a[0]);
+
+            expect(t).toContain('bg-secondary');
+            expect(t).not.toContain('bg-primary');
+            expect(t).not.toContain('brand-gradient');
+            expect(t).not.toContain('ml-auto');
+        },
+    );
+
+    it('documentation Regenerate keeps its title and is enabled (guard)', () => {
+        const tag = actions(oneHero(renderDocs()).body)[0];
+
+        expect(tag).toContain('title="Build the documentation again');
+        expect(tag).not.toMatch(/\sdisabled=""/);
+    });
+
+    it('show Continue setup keeps the wizard href with the step (guard)', () => {
+        const tag = actions(
+            oneHero(
+                renderShow({
+                    project: projectDetail({
+                        setupComplete: false,
+                        wizardStep: 'source',
+                    }),
+                }),
+            ).body,
+        )[0];
+
+        expect(tag).toMatch(/href="\/projects\/p1\/[^"]*source/);
+    });
+
+    it.each([
+        [
+            'documentation without canGenerate',
+            () => renderDocs({ canGenerate: false }),
+        ],
+        [
+            'show for a viewer',
+            () =>
+                renderShow({
+                    project: projectDetail({ setupComplete: false }),
+                    can: { update: false, delete: false },
+                }),
+        ],
+        [
+            'endpoints without canScan',
+            () =>
+                renderEndpoints({
+                    canScan: false,
+                    scan: { ...scanSummary, status: 'failed' },
+                }),
+        ],
+        [
+            'projects index without canCreate',
+            () =>
+                renderToStaticMarkup(
+                    <ProjectsIndex
+                        projects={[]}
+                        filters={{ q: '', archived: false }}
+                        canCreate={false}
+                    />,
+                ),
+        ],
+    ])('%s: the hero still renders with no action (guard)', (_, render) => {
+        expect(actions(oneHero(render()).body)).toEqual([]);
+    });
+});
+
+describe('Adversary chunk 3b: impersonation banner', () => {
+    it.each(XSS)('every name renders as text: %s', (p) => {
+        const html = renderBanner(
+            impersonation({ member: p, email: p, workspace: p, owner: p }),
+        );
+
+        expectEscaped(html, p);
+    });
+
+    it('keeps role, data-test, the kit warning tone and no gradient (guard)', () => {
+        const html = renderBanner(impersonation());
+        const root = html.slice(0, html.indexOf('>') + 1);
+
+        expect(root).toContain('role="status"');
+        expect(root).toContain('data-test="impersonation-banner"');
+        expect(tokensOfTag(root)).toEqual(
+            expect.arrayContaining([
+                'border-warning/30',
+                'bg-warning/10',
+                'text-warning',
+            ]),
+        );
+        expect(html).not.toMatch(/amber|bg-white|gradient/);
+    });
+
+    it('Return button: type=button, enabled, outline kit, hidden icons (guard)', () => {
+        const html = renderBanner(impersonation());
+        const tag = buttonTag(html, 'Return to Olivia Owner');
+
+        expect(tag).toBeDefined();
+        expect(tag).toContain('type="button"');
+        expect(tag).not.toMatch(/\sdisabled=""/);
+        expect(tokensOfTag(`<b${tag}>`)).toEqual(
+            expect.arrayContaining(['border-input', 'bg-background', 'h-7']),
+        );
+        expect(
+            html
+                .match(/<svg\b[^>]*>/g)!
+                .every((s) => s.includes('aria-hidden="true"')),
+        ).toBe(true);
+    });
+
+    // users.email max 255, no spaces.
+    const EMAIL = `${'x'.repeat(240)}@example.test`;
+    const OWNER = 'O'.repeat(255);
+
+    it('a 253-char email wraps inside the banner text (minor, pre-existing outside code)', () => {
+        const html = renderBanner(impersonation({ email: EMAIL }));
+
+        expectOneOf(openTagBefore(html, EMAIL, 'p'), WRAPS);
+    });
+
+    it('a 255-char owner name cannot push "Return to" past the strip (minor, pre-existing outside code)', () => {
+        const html = renderBanner(impersonation({ owner: OWNER }));
+        const button = tokensOfTag(openTagBefore(html, OWNER, 'button'));
+        const wrapped = new RegExp(
+            `<(?:span|strong)\\b[^>]*class="[^"]*\\b(?:truncate|wrap-anywhere|break-all)\\b[^"]*"[^>]*>${OWNER}<`,
+        ).test(html);
+
+        expect(
+            wrapped ||
+                (!button.includes('whitespace-nowrap') &&
+                    button.some((t) => [...WRAPS, 'truncate'].includes(t))),
+            button.join(' '),
+        ).toBe(true);
+    });
+});
+
+describe('Adversary chunk 3b: settings layout and GitHub guide keep outside behavior', () => {
+    it.each([
+        [false, false],
+        [false, true],
+        [true, false],
+        [true, true],
+    ])(
+        'isPlatformAdmin=%s git_import=%s: GitHub App only for both (guard)',
+        (admin, git) => {
+            const html = renderSettings(admin, git);
+            const nav = html.slice(
+                html.indexOf('<nav'),
+                html.indexOf('</nav>'),
+            );
+
+            expect(nav.includes('GitHub App')).toBe(admin && git);
+            expect(oneHero(html).body).toContain('Settings');
+
+            const svgs = nav.match(/<svg\b[^>]*>/g) ?? [];
+
+            expect(svgs).toHaveLength(admin && git ? 4 : 3);
+            expect(svgs.every((s) => s.includes('aria-hidden="true"'))).toBe(
+                true,
+            );
+            expect(html).toContain('<p>child</p>');
+        },
+    );
+
+    it('GitHub App guide: Copy buttons keep their labels; the safety note is a note Alert (guard)', () => {
+        const html = renderToStaticMarkup(
+            <GitHubAppSetupGuide
+                configured={false}
+                urls={{
+                    homepage: 'https://h',
+                    callback: 'https://c',
+                    newApp: 'https://n',
+                }}
+            />,
+        );
+
+        expect(html.match(/aria-label="Copy [^"]+"/g)?.length).toBe(3);
+
+        const alert = slotTag(html, 'alert');
+
+        expect(alert).toContain('role="note"');
+        expect(html).toContain('<strong>Safety:</strong>');
     });
 });

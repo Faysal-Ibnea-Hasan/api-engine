@@ -29,7 +29,7 @@ final class GitHubRepositories
     ) {}
 
     /** @return list<array{id: int, fullName: string, visibility: string, defaultBranch: string, archived: bool}> */
-    public function list(GitHubInstallation $installation): array
+    public function list(GitHubInstallation $installation, string $workspaceId): array
     {
         self::assertUsable($installation);
         $repositories = [];
@@ -39,7 +39,7 @@ final class GitHubRepositories
             $items = (array) ($response['repositories'] ?? []);
 
             foreach ($items as $repo) {
-                if (is_array($repo) && is_int($repo['id'] ?? null)) {
+                if (is_array($repo) && is_int($repo['id'] ?? null) && $installation->allowsRepository($workspaceId, $repo['id'])) {
                     $repositories[] = self::summary($repo);
                 }
             }
@@ -57,9 +57,13 @@ final class GitHubRepositories
      *
      * @return array<mixed>
      */
-    public function fetch(GitHubInstallation $installation, int $repositoryId): array
+    public function fetch(GitHubInstallation $installation, int $repositoryId, string $workspaceId): array
     {
         self::assertUsable($installation);
+
+        if (! $installation->allowsRepository($workspaceId, $repositoryId)) {
+            throw GitHubError::of('github.repository_not_allowed');
+        }
 
         $repo = $this->tokens->with($installation, $repositoryId, fn (string $token) => $this->client->json('GET', GitHubApiClient::path('/repositories/%s', $repositoryId), $token, [], [
             404 => 'github.repository_not_allowed',
@@ -84,7 +88,7 @@ final class GitHubRepositories
             throw ProjectError::archived();
         }
 
-        $repo = $this->fetch($installation, $repositoryId);
+        $repo = $this->fetch($installation, $repositoryId, $project->workspace_id);
 
         $source = DB::transaction(function () use ($actor, $project, $installation, $repo) {
             $projectSource = $this->importer->sourceFor($actor, $project, SourceType::Git);

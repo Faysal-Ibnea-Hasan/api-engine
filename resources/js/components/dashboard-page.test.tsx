@@ -203,7 +203,7 @@ describe('AC33: dashboard tiles use card-hover', () => {
 
             for (const token of [
                 'transition-[border-color,box-shadow]',
-                'hover:border-primary/40',
+                'hover:border-info/40',
                 'hover:shadow-sm',
                 'outline-none',
                 'focus-visible:ring-[3px]',
@@ -299,9 +299,11 @@ describe('AC24: recent projects branch', () => {
             }),
         );
 
+    // Revision 11 (AC24): the h2 now holds a History icon before its text, so the
+    // pattern allows one leading <svg>. The text is still required inside an h2.
     it('has a Recent projects h2', () => {
         expect(withWorkspace(true, R)).toMatch(
-            /<h2\b[^>]*>\s*Recent projects\s*<\/h2>/,
+            /<h2\b[^>]*>\s*(?:<svg\b[^>]*>[\s\S]*?<\/svg>)?\s*Recent projects\s*<\/h2>/,
         );
     });
 
@@ -358,6 +360,19 @@ describe('AC24: recent projects branch', () => {
         }
     });
 
+    it.each([0, 1])('row %i name span truncates and has a title', (i) => {
+        const row = rows(withWorkspace(true, R))[i];
+        const spans = [...row.matchAll(/<span\b([^>]*)>([^<]*)<\/span>/g)];
+        const span = spans.find((s) => s[2] === R[i].name);
+
+        expect(span).toBeDefined();
+        expect(span![1].match(/\btitle="([^"]*)"/)?.[1]).toBe(R[i].name);
+
+        for (const token of ['font-medium', 'min-w-0', 'truncate']) {
+            expect(tagTokens(span![1])).toContain(token);
+        }
+    });
+
     it('shows the status badges for each row', () => {
         const [r1, r2] = rows(withWorkspace(true, R));
 
@@ -404,5 +419,159 @@ describe('AC24: recent projects branch', () => {
 
         expect(html).toContain('&lt;img');
         expect(html).not.toContain('<img');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Revision 11 (chunk 3b): hero, tile icon tiles, card border, empty-state tile
+// ---------------------------------------------------------------------------
+
+describe('AC24: hero and icons (revision 11)', () => {
+    const heroes = (html: string) =>
+        [
+            ...html.matchAll(
+                /<header\b([^>]*\bdata-slot="page-hero"[^>]*)>([\s\S]*?)<\/header>/g,
+            ),
+        ].map((m) => ({ tag: m[1], body: m[2] }));
+
+    const svgs = (html: string) => html.match(/<svg\b[^>]*>/g) ?? [];
+
+    /** Opening tags of `<span>`s that directly wrap an `<svg>`: icon tiles. */
+    const tilesIn = (html: string) =>
+        [...html.matchAll(/<span\b([^>]*)>\s*(<svg\b[^>]*>)/g)].map((m) => ({
+            tokens: tokenize(
+                unescape(m[1].match(/\bclass="([^"]*)"/)?.[1] ?? ''),
+            ),
+            svg: m[2],
+        }));
+
+    const anchorsWithBody = (html: string) =>
+        [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].map((m) => ({
+            href: unescape(m[1].match(/\bhref="([^"]*)"/)?.[1] ?? ''),
+            tokens: tokenize(
+                unescape(m[1].match(/\bclass="([^"]*)"/)?.[1] ?? ''),
+            ),
+            body: m[2],
+        }));
+
+    describe.each([
+        ['workspace branch', () => withWorkspace(true), workspace.name],
+        [
+            'workspace management off',
+            () =>
+                render({
+                    features: { project_wizard: true },
+                    workspaces: null,
+                    currentWorkspace: null,
+                }),
+            'Dashboard',
+        ],
+    ])('%s', (_branch, html, title) => {
+        it('has exactly one page hero', () => {
+            expect(html().match(/data-slot="page-hero"/g)).toHaveLength(1);
+            expect(heroes(html())).toHaveLength(1);
+        });
+
+        it('the hero holds the title in an h2', () => {
+            expect(heroes(html())[0].body).toMatch(
+                new RegExp(`<h2\\b[^>]*>\\s*${title}\\s*</h2>`),
+            );
+        });
+
+        it('the hero holds exactly one hidden svg in a gradient-foreground span', () => {
+            const { body } = heroes(html())[0];
+
+            expect(svgs(body)).toHaveLength(1);
+            expect(svgs(body)[0]).toContain('aria-hidden="true"');
+            expect(tilesIn(body)).toHaveLength(1);
+            expect(tilesIn(body)[0].tokens).toContain(
+                'bg-gradient-foreground/15',
+            );
+        });
+    });
+
+    describe('tiles', () => {
+        const tiles = () =>
+            anchorsWithBody(withWorkspace(true)).filter((a) =>
+                [PROJECTS, MEMBERS, PROFILE].includes(a.href),
+            );
+
+        it.each([
+            ['projects', PROJECTS],
+            ['members', MEMBERS],
+            ['profile', PROFILE],
+        ])(
+            'the %s tile has an icon tile and the gradient border',
+            (_n, href) => {
+                const tile = tiles().find((t) => t.href === href)!;
+
+                expect(tile.tokens).toContain('brand-gradient-border');
+
+                const iconTiles = tilesIn(tile.body);
+
+                expect(iconTiles).toHaveLength(1);
+
+                for (const token of [
+                    'brand-gradient',
+                    'text-gradient-foreground',
+                    'size-8',
+                    'rounded-md',
+                ]) {
+                    expect(iconTiles[0].tokens).toContain(token);
+                }
+
+                expect(iconTiles[0].svg).toContain('aria-hidden="true"');
+            },
+        );
+    });
+
+    it('the Recent projects h2 holds one hidden blue size-4 svg (revision 12b: text-info)', () => {
+        const html = withWorkspace(true, [
+            {
+                id: 'p1',
+                name: 'Billing API',
+                slug: 'billing-api',
+                status: 'active',
+                visibility: 'workspace',
+                setupComplete: true,
+                updatedAt: null,
+            },
+        ]);
+        const h2 = [...html.matchAll(/<h2\b[^>]*>([\s\S]*?)<\/h2>/g)].find(
+            (m) => m[1].includes('Recent projects'),
+        );
+
+        expect(h2, 'no Recent projects h2').toBeDefined();
+        expect(svgs(h2![1])).toHaveLength(1);
+        expect(svgs(h2![1])[0]).toContain('aria-hidden="true"');
+        expect(
+            tokenize(svgs(h2![1])[0]!.match(/\bclass="([^"]*)"/)?.[1] ?? ''),
+        ).toEqual(expect.arrayContaining(['size-4', 'text-info']));
+    });
+
+    it('the no-workspace branch has no hero and a gradient EmptyState tile', () => {
+        const html = render({
+            features: { project_wizard: true },
+            workspaces: [],
+            currentWorkspace: null,
+        });
+
+        expect(html).not.toContain('page-hero');
+
+        const tile = tilesIn(html).find((t) =>
+            t.tokens.includes('brand-gradient'),
+        );
+
+        expect(tile, 'no gradient icon tile').toBeDefined();
+
+        for (const token of [
+            'text-gradient-foreground',
+            'size-10',
+            'rounded-lg',
+        ]) {
+            expect(tile!.tokens).toContain(token);
+        }
+
+        expect(tile!.svg).toContain('aria-hidden="true"');
     });
 });

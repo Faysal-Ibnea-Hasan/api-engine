@@ -18,6 +18,33 @@ final class AnalysisPresenter
         return trim((string) preg_replace(['/\s*\((?:path )?at line \d+\)|\s*\(line \d+\)/', '/\s+at line \d+/'], ['', ''], $text));
     }
 
+    /**
+     * The workflow graph. Without source access: no evidence ids, no source expressions, no line numbers.
+     *
+     * @param  array<string, mixed>  $graph
+     * @return array<string, mixed>
+     */
+    public static function graph(array $graph, bool $withSource): array
+    {
+        if ($withSource) {
+            return $graph;
+        }
+        $graph['edges'] = array_map(function (array $e) {
+            unset($e['evidence'], $e['expression']);
+            isset($e['note']) && $e['note'] = self::withoutLines((string) $e['note']);
+
+            return $e;
+        }, $graph['edges'] ?? []);
+        $graph['nodes'] = array_map(function (array $n) {
+            $n['label'] = self::withoutLines((string) $n['label']);
+            isset($n['fields']) && $n['fields'] = array_map(fn (array $f) => array_diff_key($f, ['expression' => true]), $n['fields']);
+
+            return $n;
+        }, $graph['nodes'] ?? []);
+
+        return $graph;
+    }
+
     /** @return array<string, mixed> */
     public static function analysis(EndpointAnalysis $a, bool $withSource): array
     {
@@ -41,6 +68,7 @@ final class AnalysisPresenter
 
                 return $s;
             }, $result['auth']['signals']);
+            isset($result['graph']) && $result['graph'] = self::graph($result['graph'], false);
         }
 
         return [

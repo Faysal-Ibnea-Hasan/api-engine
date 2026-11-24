@@ -57,7 +57,7 @@
         ],
         "queue": [
             "Composer\\Config::disableProcessTimeout",
-            "@php artisan queue:work --queue=default,imports,discovery,analysis,ai --tries=3 --timeout=1800"
+            "@php artisan queue:work --queue=default,imports,discovery,analysis,ai --tries=3 --timeout=1800 --memory=1024"
         ],
         "lint": [
             "pint --parallel"

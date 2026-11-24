@@ -1,4 +1,5 @@
 import { Form, Head, router } from '@inertiajs/react';
+import { toast } from 'sonner';
 import GitHubAppSettingsController from '@/actions/App/Http/Controllers/Settings/GitHubAppSettingsController';
 import { CopyValue, GitHubAppSetupGuide } from '@/components/github-guides';
 import Heading from '@/components/heading';
@@ -27,6 +28,15 @@ type Props = {
         newApp: string;
         publicPage: string | null;
     };
+};
+
+const FIELD_LABELS: Record<string, string> = {
+    app_id: 'App ID',
+    slug: 'App slug',
+    client_id: 'Client ID',
+    client_secret: 'Client secret',
+    private_key: 'Private key',
+    private_key_file: 'Private key',
 };
 
 function SecretState({ set }: { set: boolean }) {
@@ -94,6 +104,23 @@ export default function GitHubAppSettings({ settings, urls }: Props) {
                         'private_key',
                         'private_key_file',
                     ]}
+                    onError={(errors) => {
+                        // The form sits below a long guide: say what failed and bring the first bad field into view.
+                        const fields = Object.keys(errors);
+                        toast.error(
+                            `Not saved. Fix: ${fields.map((f) => FIELD_LABELS[f] ?? f).join(', ')}.`,
+                        );
+                        const first = document.getElementById(
+                            fields[0] === 'private_key_file'
+                                ? 'private_key'
+                                : (fields[0] ?? ''),
+                        );
+                        first?.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'center',
+                        });
+                        first?.focus({ preventScroll: true });
+                    }}
                     className="space-y-6"
                 >
                     {({ processing, errors }) => (

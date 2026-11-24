@@ -1,5 +1,6 @@
-import { Check, ChevronDown, Copy } from 'lucide-react';
+import { Check, ChevronDown, Copy, ShieldCheck } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
     Collapsible,
@@ -22,13 +23,13 @@ export function CopyValue({ label, value }: { label: string; value: string }) {
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => void copy(value)}
+                onClick={() => void copy(value, label)}
                 aria-label={`Copy ${label}`}
             >
                 {copied === value ? (
-                    <Check className="size-4" />
+                    <Check aria-hidden="true" className="size-4" />
                 ) : (
-                    <Copy className="size-4" />
+                    <Copy aria-hidden="true" className="size-4" />
                 )}
                 {copied === value ? 'Copied' : 'Copy'}
             </Button>
@@ -56,7 +57,10 @@ function Guide({
                     className="group flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                     {title}
-                    <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+                    <ChevronDown
+                        aria-hidden="true"
+                        className="size-4 transition-transform group-data-[state=open]:rotate-180"
+                    />
                 </button>
             </CollapsibleTrigger>
             <CollapsibleContent className="border-t px-4 py-3 text-sm">
@@ -66,7 +70,8 @@ function Guide({
     );
 }
 
-const link = 'font-medium underline underline-offset-4';
+const link =
+    'rounded-sm font-medium underline underline-offset-4 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
 /**
  * The one place the GitHub App setup steps live (README "GitHub import: setup
@@ -182,20 +187,24 @@ export function GitHubAppSetupGuide({
                     private key: generate a new key, save, and test again.
                 </li>
             </ol>
-            <div className="mt-4 space-y-1 rounded-md bg-muted p-3 text-muted-foreground">
-                <p>
-                    <strong>Safety:</strong> API Engine asks GitHub for
-                    read-only access and never writes to repositories.
-                </p>
-                <p>
-                    The client secret and private key are stored encrypted and
-                    are never shown again, not even here.
-                </p>
-                <p>
-                    To rotate them, generate a new client secret or private key
-                    on GitHub, save it here, then delete the old one on GitHub.
-                </p>
-            </div>
+            <Alert variant="info" role="note" className="mt-4">
+                <ShieldCheck aria-hidden="true" />
+                <AlertDescription className="space-y-1">
+                    <p>
+                        <strong>Safety:</strong> API Engine asks GitHub for
+                        read-only access and never writes to repositories.
+                    </p>
+                    <p>
+                        The client secret and private key are stored encrypted
+                        and are never shown again, not even here.
+                    </p>
+                    <p>
+                        To rotate them, generate a new client secret or private
+                        key on GitHub, save it here, then delete the old one on
+                        GitHub.
+                    </p>
+                </AlertDescription>
+            </Alert>
         </Guide>
     );
 }
@@ -215,8 +224,11 @@ export function GitHubImportHelp({
                     <a className={link} href={integrationsUrl}>
                         Connect GitHub
                     </a>{' '}
-                    (workspace Owners and Maintainers). On GitHub, choose the
-                    account or organization and which repositories to grant.
+                    (workspace Owners and Maintainers). GitHub asks you to
+                    authorize the app; every account or organization where it is
+                    already installed is then connected. If it isn't installed
+                    anywhere yet, GitHub asks where to install it and which
+                    repositories to grant.
                 </li>
                 <li>
                     Back here, pick the repository, then a branch, tag, full

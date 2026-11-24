@@ -1,4 +1,5 @@
 import { Form, router } from '@inertiajs/react';
+import { Layers } from 'lucide-react';
 import { useState } from 'react';
 import DetectionController from '@/actions/App/Http/Controllers/Framework/DetectionController';
 import Heading from '@/components/heading';
@@ -68,6 +69,7 @@ export default function FrameworkDetectionCard({
                 <Heading
                     variant="small"
                     title="Framework"
+                    icon={Layers}
                     description="Detection runs automatically after an import. It reads files only; nothing is executed."
                 />
                 {runButton}
@@ -80,7 +82,7 @@ export default function FrameworkDetectionCard({
     return (
         <section className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
-                <Heading variant="small" title="Framework" />
+                <Heading variant="small" title="Framework" icon={Layers} />
                 <Badge
                     variant={
                         detection.status === 'detected'
@@ -193,7 +195,7 @@ export default function FrameworkDetectionCard({
                                 >
                                     <input
                                         type="radio"
-                                        className="size-4 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                                        className="size-4 accent-info focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                                         checked={choice === root.path}
                                         onChange={() => setChoice(root.path)}
                                     />
@@ -206,7 +208,7 @@ export default function FrameworkDetectionCard({
                             <label className="flex items-center gap-2 text-sm">
                                 <input
                                     type="radio"
-                                    className="size-4 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                                    className="size-4 accent-info focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                                     checked={choice === OTHER}
                                     onChange={() => setChoice(OTHER)}
                                 />

@@ -1,5 +1,5 @@
 import { Form, Head, Link } from '@inertiajs/react';
-import { Check } from 'lucide-react';
+import { Check, FolderPlus } from 'lucide-react';
 import ProjectController from '@/actions/App/Http/Controllers/Projects/ProjectController';
 import ProjectWizardController from '@/actions/App/Http/Controllers/Projects/ProjectWizardController';
 import Heading from '@/components/heading';
@@ -41,7 +41,7 @@ function Choice({
             className={cn(
                 'flex gap-3 rounded-lg border p-3',
                 option.available
-                    ? 'cursor-pointer has-checked:border-primary'
+                    ? 'cursor-pointer has-checked:border-info'
                     : 'cursor-not-allowed opacity-60',
             )}
         >
@@ -52,7 +52,7 @@ function Choice({
                 defaultChecked={checked && option.available}
                 disabled={!option.available}
                 required
-                className="mt-1 size-4 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                className="mt-1 size-4 accent-info focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             />
             <span>
                 <span className="block text-sm font-medium">
@@ -98,6 +98,7 @@ export default function ProjectWizard({
                         project ? `Set up ${project.name}` : 'Create project'
                     }
                     description="Each step is saved as you continue. You can leave and pick up where you stopped."
+                    icon={FolderPlus}
                 />
 
                 <ol
@@ -143,7 +144,7 @@ export default function ProjectWizard({
                                         className={cn(
                                             'flex items-center gap-1 rounded-full border px-3 py-1',
                                             s === step
-                                                ? 'border-primary bg-primary text-primary-foreground'
+                                                ? 'border-info bg-info text-info-foreground'
                                                 : 'text-muted-foreground',
                                         )}
                                     >

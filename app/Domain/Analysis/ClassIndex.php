@@ -78,6 +78,55 @@ final class ClassIndex
         return $this->cache[$fqcn] = null;
     }
 
+    /** A class already looked up by find(), without reading anything new. */
+    public function cached(string $fqcn): ?ClassInfo
+    {
+        return $this->cache[ltrim($fqcn, '\\')] ?? null;
+    }
+
+    /** @var array<string, string> */
+    private array $interfaces = [];
+
+    /**
+     * What a name find() returned null for is (find() only returns classes and traits):
+     * interface (declared in the snapshot), missing (in the app's namespace but not in the snapshot),
+     * outside (no app namespace or file: a library), or unchecked (the lookup cap was reached).
+     * Read apart from find()'s cache and file limit, so asking changes nothing else.
+     * shortcut: at most 100 lookups per analysis; raise it if large apps report "unchecked" often.
+     */
+    public function interfaceStatus(string $fqcn): string
+    {
+        $fqcn = ltrim($fqcn, '\\');
+        $key = strtolower($fqcn);
+        if (isset($this->interfaces[$key]) || count($this->interfaces) >= 100) {
+            return $this->interfaces[$key] ?? 'unchecked';
+        }
+
+        $paths = [];
+        $claimed = false;
+        foreach ($this->psr4 as $prefix => $dir) {
+            if (str_starts_with($fqcn, $prefix)) {
+                $claimed = true;
+                $paths[] = SnapshotPaths::normalize(SnapshotPaths::join($dir, str_replace('\\', '/', substr($fqcn, strlen($prefix))).'.php'));
+            }
+        }
+        // find()'s fallback: a file named after it, inside the application root.
+        $short = substr(strrchr('\\'.$fqcn, '\\') ?: $fqcn, 1);
+        $paths = [...$paths, ...SourceFile::query()->where('source_snapshot_id', $this->snapshot->id)->whereNull('excluded_reason')
+            ->where('path', 'like', '%/'.str_replace(['%', '_'], ['\%', '\_'], $short).'.php')->limit(20)->pluck('path')
+            ->filter(fn ($p) => basename((string) $p) === $short.'.php' && SnapshotPaths::within((string) $p, $this->root))->all()];
+
+        foreach (array_unique(array_filter($paths)) as $path) {
+            $code = $this->reader->read($this->snapshot, (string) $path);
+            if ($code !== null && strlen($code) <= self::MAX_FILE_BYTES && (new NodeFinder)->findFirst(ParsedFile::parse((string) $path, mb_scrub($code, 'UTF-8'), $this->root)->stmts,
+                fn ($n) => $n instanceof Stmt\Interface_ && $n->namespacedName !== null && strcasecmp($n->namespacedName->toString(), $fqcn) === 0) !== null) {
+                return $this->interfaces[$key] = 'interface';
+            }
+        }
+
+        return $this->interfaces[$key] = $claimed ? 'missing' : 'outside';
+    }
+
     /**
      * Does $class extend $ancestor? null = unknown (a parent couldn't be read, e.g. it is in vendor/).
      */

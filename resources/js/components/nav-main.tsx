@@ -22,12 +22,12 @@ export function NavMain({ items }: { items: NavItem[] }) {
                     <SidebarMenuItem key={item.title}>
                         <SidebarMenuButton
                             asChild
-                            className="relative data-[active=true]:before:absolute data-[active=true]:before:inset-y-1.5 data-[active=true]:before:left-0 data-[active=true]:before:w-0.5 data-[active=true]:before:rounded-full data-[active=true]:before:bg-sidebar-primary"
+                            className="relative data-[active=true]:before:absolute data-[active=true]:before:inset-y-1.5 data-[active=true]:before:left-0 data-[active=true]:before:w-0.5 data-[active=true]:before:rounded-full data-[active=true]:before:bg-sidebar-primary data-[active=true]:before:brand-gradient"
                             isActive={isCurrentUrl(item.href)}
                             tooltip={{ children: item.title }}
                         >
                             <Link href={item.href} prefetch>
-                                {item.icon && <item.icon />}
+                                {item.icon && <item.icon aria-hidden="true" />}
                                 <span>{item.title}</span>
                             </Link>
                         </SidebarMenuButton>

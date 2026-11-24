@@ -74,9 +74,12 @@ final class Pipeline
      */
     private function outward(array $value, int $layer, string $trigger): array
     {
+        // Serializing what the action returned (its resources' toArray()) is part of the action's workflow.
+        $rooted = $value['k'] !== 'exception' && $layer === count($this->layers) && $this->interpreter->recorder?->resume() === true;
         $responses = $value['k'] === 'exception'
             ? $this->render($value, $trigger)
             : [array_merge($this->interpreter->toResponse($value), ['trigger' => $trigger])];
+        $rooted && $this->interpreter->recorder->end();
 
         for ($i = $layer - 1; $i >= 0; $i--) {
             $next = [];

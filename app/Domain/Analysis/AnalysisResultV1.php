@@ -2,6 +2,7 @@
 
 namespace App\Domain\Analysis;
 
+use App\Domain\Analysis\Shape\Recorder;
 use Illuminate\Support\Facades\Validator;
 
 /**
@@ -55,13 +56,27 @@ final class AnalysisResultV1
             'contract.errors' => ['present_with:contract', 'array'],
             'contract.errors.*.triggers' => ['required', 'array', 'min:1'],
             'unresolved.*' => ['string'],
+            // advanced profile (P10): the workflow graph (absent in basic results)
+            'graph' => ['sometimes', 'array'],
+            'graph.version' => ['required_with:graph', 'string'],
+            'graph.nodes' => ['present_with:graph', 'array'],
+            'graph.nodes.*.id' => ['required', 'string', 'distinct'],
+            'graph.nodes.*.type' => ['required', 'in:'.implode(',', Recorder::NODE_TYPES)],
+            'graph.edges' => ['present_with:graph', 'array'],
+            'graph.edges.*.from' => ['required', 'string'],
+            'graph.edges.*.to' => ['required', 'string'],
+            'graph.edges.*.kind' => ['required', 'in:'.implode(',', Recorder::KINDS)],
+            'graph.edges.*.conditional' => ['required', 'boolean'],
+            'graph.edges.*.resolution' => ['required', 'in:resolved,unresolved'],
+            'graph.edges.*.evidence' => ['present', 'array'],
+            'graph.coverage' => ['required_with:graph', 'array'],
         ]);
 
         $problems = $validator->errors()->all();
 
         // Every fact may only cite evidence the result carries.
         $ids = array_column(is_array($result['evidence'] ?? null) ? $result['evidence'] : [], 'id');
-        $facts = [...($result['request']['fields'] ?? []), ...($result['request']['headers'] ?? []), ...($result['responses'] ?? []), ...($result['auth']['signals'] ?? [])];
+        $facts = [...($result['request']['fields'] ?? []), ...($result['request']['headers'] ?? []), ...($result['responses'] ?? []), ...($result['auth']['signals'] ?? []), ...($result['graph']['edges'] ?? [])];
         foreach ($facts as $fact) {
             foreach (is_array($fact['evidence'] ?? null) ? $fact['evidence'] : [] as $ref) {
                 in_array($ref, $ids, true) || $problems[] = "Evidence {$ref} is cited but not present.";

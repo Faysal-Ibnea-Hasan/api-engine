@@ -29,7 +29,7 @@ export default function Progress({
         >
             <div
                 className={cn(
-                    'h-full rounded-full bg-primary transition-[width]',
+                    'h-full rounded-full bg-info transition-[width]',
                     clamped === undefined &&
                         'w-1/3 animate-pulse motion-reduce:animate-none',
                 )}

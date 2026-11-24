@@ -29,7 +29,7 @@ class GitHubRepositoryController extends Controller
         Gate::authorize('update', $project);
         $linked = GitHubInstallation::linkedTo($project->workspace_id, $installation) ?? abort(404);
 
-        return response()->json($repositories->list($linked));
+        return response()->json($repositories->list($linked, $project->workspace_id));
     }
 
     public function update(SelectGitHubRepositoryRequest $request, Project $project, GitHubRepositories $repositories): RedirectResponse

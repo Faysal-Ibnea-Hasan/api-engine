@@ -1,4 +1,5 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
+import { Code, Info, Route as RouteIcon } from 'lucide-react';
 import { useState } from 'react';
 import DocumentationController from '@/actions/App/Http/Controllers/Docs/DocumentationController';
 import EndpointController from '@/actions/App/Http/Controllers/Discovery/EndpointController';
@@ -63,17 +64,17 @@ export default function ShowEndpoint({
         <>
             <Head title={`${endpoint.methods.join(' ')} ${endpoint.uri}`} />
             <div className="flex w-full flex-col gap-4 p-4 md:p-6">
-                <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                        {endpoint.methods.map((m) => (
-                            <MethodBadge key={m} method={m} />
-                        ))}
-                        <ResolutionBadge resolution={endpoint.resolution} />
-                    </div>
-                    <Heading
-                        title={`${endpoint.domain ?? ''}${endpoint.uri}`}
-                        description={endpoint.name ?? 'Unnamed route'}
-                    />
+                <Heading
+                    title={`${endpoint.domain ?? ''}${endpoint.uri}`}
+                    description={endpoint.name ?? 'Unnamed route'}
+                    icon={RouteIcon}
+                />
+
+                <div className="flex flex-wrap items-center gap-2">
+                    {endpoint.methods.map((m) => (
+                        <MethodBadge key={m} method={m} />
+                    ))}
+                    <ResolutionBadge resolution={endpoint.resolution} />
                 </div>
 
                 {!isCurrent && (
@@ -149,6 +150,7 @@ export default function ShowEndpoint({
                                     ? 'Notes'
                                     : "Why it isn't fully resolved"
                             }
+                            icon={Info}
                         />
                         <ul className="list-inside list-disc text-muted-foreground">
                             {endpoint.reasons.map((r) => (
@@ -160,7 +162,11 @@ export default function ShowEndpoint({
 
                 {endpoint.source?.expression && (
                     <section className="space-y-1">
-                        <Heading variant="small" title="Route definition" />
+                        <Heading
+                            variant="small"
+                            title="Route definition"
+                            icon={Code}
+                        />
                         <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 text-xs">
                             <code>{endpoint.source.expression}</code>
                         </pre>

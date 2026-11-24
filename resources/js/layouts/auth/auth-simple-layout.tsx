@@ -9,16 +9,16 @@ export default function AuthSimpleLayout({
     description,
 }: AuthLayoutProps) {
     return (
-        <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-muted/40 p-4 md:p-6">
-            <div className="w-full max-w-sm rounded-lg border bg-card p-6">
+        <div className="flex min-h-svh flex-col items-center justify-center gap-6 page-gradient p-4 md:p-6">
+            <div className="w-full max-w-sm rounded-lg border brand-gradient-border bg-card p-6">
                 <div className="flex flex-col gap-6">
                     <div className="flex flex-col items-center gap-3">
                         <Link
                             href={home()}
                             className="flex flex-col items-center gap-2 rounded-md font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                         >
-                            <div className="flex size-8 items-center justify-center rounded-md">
-                                <AppLogoIcon className="size-8 fill-current text-primary" />
+                            <div className="flex size-10 items-center justify-center rounded-lg brand-gradient text-gradient-foreground">
+                                <AppLogoIcon className="size-6 fill-current" />
                             </div>
                             <span className="sr-only">{title}</span>
                         </Link>

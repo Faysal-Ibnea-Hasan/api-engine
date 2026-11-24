@@ -2,12 +2,14 @@
 
 namespace App\Domain\Analysis;
 
+use App\Domain\Analysis\Shape\Recorder;
 use App\Domain\Audit\AuditLog;
 use App\Domain\Projects\ProjectError;
 use App\Domain\Sources\RunStatus;
 use App\Jobs\AnalyzeEndpointJob;
 use App\Models\AnalysisEvidence;
 use App\Models\AnalysisFinding;
+use App\Models\ApiDependency;
 use App\Models\ApiEndpoint;
 use App\Models\EndpointAnalysis;
 use App\Models\User;
@@ -26,13 +28,20 @@ final class EndpointAnalyses
 {
     public const JOB_TIMEOUT = 120;
 
+    /** The contract only. */
+    public const BASIC = 'basic';
+
+    /** The contract plus the workflow graph (P10, `advanced_analysis`): a separate row with its own fingerprint. */
+    public const ADVANCED = 'advanced';
+
     public function __construct(private readonly EndpointAnalyzer $analyzer) {}
 
     /**
      * The idempotency fingerprint. Includes what discovery resolved (its version and handler):
      * a newer route analyzer that re-resolves an endpoint must not reuse a stale final analysis.
+     * The basic key is unchanged from before profiles existed; the advanced one adds the graph version.
      */
-    public static function key(ApiEndpoint $endpoint): string
+    public static function key(ApiEndpoint $endpoint, string $profile = self::BASIC): string
     {
         $scan = $endpoint->scan;
 
@@ -40,6 +49,7 @@ final class EndpointAnalyses
             $endpoint->source_snapshot_id, $scan->application_root, $scan->analyzer_version,
             $endpoint->route_identity, $endpoint->handler_type, (string) $endpoint->controller, (string) $endpoint->action,
             EndpointAnalyzer::VERSION,
+            ...($profile === self::ADVANCED ? [self::ADVANCED, Recorder::VERSION] : []),
         ]));
     }
 
@@ -47,7 +57,7 @@ final class EndpointAnalyses
      * @param  bool  $reanalyze  run a finished analysis again (its result is replaced when the new one is written;
      *                           documentation drafts keep their own copy)
      */
-    public function start(?User $actor, ApiEndpoint $endpoint, bool $reanalyze = false): EndpointAnalysis
+    public function start(?User $actor, ApiEndpoint $endpoint, bool $reanalyze = false, string $profile = self::BASIC): EndpointAnalysis
     {
         $scan = $endpoint->scan;
 
@@ -55,7 +65,7 @@ final class EndpointAnalyses
             throw ProjectError::archived();
         }
 
-        $key = self::key($endpoint);
+        $key = self::key($endpoint, $profile);
         $analysis = EndpointAnalysis::query()->where('analysis_key', $key)->first();
 
         if ($analysis !== null) {
@@ -82,6 +92,7 @@ final class EndpointAnalyses
             'application_root' => $scan->application_root,
             'analyzer_version' => EndpointAnalyzer::VERSION,
             'schema_version' => EndpointAnalyzer::SCHEMA_VERSION,
+            'profile' => $profile,
             'analysis_key' => $key,
             'status' => RunStatus::Queued,
             'created_by' => $actor?->id,
@@ -94,7 +105,7 @@ final class EndpointAnalyses
             return EndpointAnalysis::query()->where('analysis_key', $key)->firstOrFail(); // a double click raced us
         }
 
-        AuditLog::record('analysis.started', $scan->project->workspace, $actor, $analysis, ['route_identity' => $endpoint->route_identity]);
+        AuditLog::record('analysis.started', $scan->project->workspace, $actor, $analysis, ['route_identity' => $endpoint->route_identity, ...($profile === self::ADVANCED ? ['profile' => $profile] : [])]);
         AnalyzeEndpointJob::dispatch($analysis->id);
 
         return $analysis->refresh();
@@ -106,7 +117,18 @@ final class EndpointAnalyses
      */
     public static function isStale(EndpointAnalysis $analysis): bool
     {
-        return $analysis->isFinal() && ($analysis->result['analyzer_version'] ?? null) !== $analysis->analyzer_version;
+        return $analysis->isFinal() && (($analysis->result['analyzer_version'] ?? null) !== $analysis->analyzer_version || ! self::hasExpectedGraph($analysis, $analysis->result ?? []));
+    }
+
+    /**
+     * An advanced row must carry this release's graph: the analyzer version alone can't tell, because
+     * a worker running code from before profiles existed writes the same version without one.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private static function hasExpectedGraph(EndpointAnalysis $analysis, array $result): bool
+    {
+        return $analysis->profile !== self::ADVANCED || ($result['graph']['version'] ?? null) === Recorder::VERSION;
     }
 
     public function process(string $analysisId): void
@@ -135,7 +157,7 @@ final class EndpointAnalyses
         }
 
         try {
-            $result = $this->analyzer->analyze($analysis->snapshot, $analysis->endpoint, $analysis->application_root);
+            $result = $this->analyzer->analyze($analysis->snapshot, $analysis->endpoint, $analysis->application_root, $analysis->profile);
         } catch (Throwable $e) {
             EndpointAnalysis::query()->whereKey($analysisId)->where('status', RunStatus::Running->value)->update(['claimed_at' => null]);
 
@@ -151,7 +173,7 @@ final class EndpointAnalyses
             return;
         }
 
-        if (($result['analyzer_version'] ?? null) !== $analysis->analyzer_version) {
+        if (($result['analyzer_version'] ?? null) !== $analysis->analyzer_version || ! self::hasExpectedGraph($analysis, $result)) {
             // This worker runs older code than the app that queued the job: never store its result under the new version.
             Log::warning('analysis.analyzer_mismatch', ['analysis_id' => $analysisId, 'expected' => $analysis->analyzer_version, 'got' => $result['analyzer_version'] ?? null]);
             $this->fail($analysisId, 'analyzer_mismatch');
@@ -182,6 +204,7 @@ final class EndpointAnalyses
 
             AnalysisEvidence::query()->where('endpoint_analysis_id', $analysis->id)->delete();
             AnalysisFinding::query()->where('endpoint_analysis_id', $analysis->id)->delete();
+            ApiDependency::query()->where('endpoint_analysis_id', $analysis->id)->delete();
 
             foreach (array_chunk($result['evidence'], 500) as $chunk) {
                 AnalysisEvidence::query()->insert(array_map(fn (array $ev) => [
@@ -202,6 +225,29 @@ final class EndpointAnalyses
                     'severity' => 'warning',
                     'code' => 'unresolved',
                     'message' => mb_substr($message, 0, 500),
+                    'created_at' => now(),
+                ], $chunk));
+            }
+
+            $types = array_column($result['graph']['nodes'] ?? [], 'type', 'id');
+            foreach (array_chunk($result['graph']['edges'] ?? [], 500) as $chunk) {
+                ApiDependency::query()->insert(array_map(fn (array $e) => [
+                    'endpoint_analysis_id' => $analysis->id,
+                    'workspace_id' => $analysis->workspace_id,
+                    'project_id' => $analysis->project_id,
+                    'edge_hash' => hash('sha256', $e['from']."\n".$e['to']."\n".$e['kind']),
+                    'kind' => $e['kind'],
+                    'from_node' => mb_substr($e['from'], 0, 512),
+                    'from_type' => $types[$e['from']] ?? 'service',
+                    'to_node' => mb_substr($e['to'], 0, 512),
+                    'to_type' => $types[$e['to']] ?? 'service',
+                    'conditional' => $e['conditional'],
+                    'resolution' => $e['resolution'],
+                    'reason' => $e['reason'],
+                    'async' => $e['async'],
+                    'note' => $e['note'] === null ? null : mb_substr($e['note'], 0, 500),
+                    'expression' => $e['expression'] === null ? null : mb_substr($e['expression'], 0, 255),
+                    'evidence' => json_encode($e['evidence'], JSON_THROW_ON_ERROR),
                     'created_at' => now(),
                 ], $chunk));
             }

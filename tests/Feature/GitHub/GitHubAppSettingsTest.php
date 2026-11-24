@@ -142,7 +142,7 @@ class GitHubAppSettingsTest extends TestCase
         [, $payload, $signature] = explode('.', $jwt = app(GitHubAppJwt::class)->make());
         $public = openssl_pkey_get_details(openssl_pkey_get_private($pem))['key'];
         $this->assertSame(1, openssl_verify(implode('.', array_slice(explode('.', $jwt), 0, 2)), (string) base64_decode(strtr($signature, '-_', '+/')), $public, OPENSSL_ALGO_SHA256));
-        $this->assertSame('777', json_decode((string) base64_decode(strtr($payload, '-_', '+/')), true)['iss']);
+        $this->assertSame(777, json_decode((string) base64_decode(strtr($payload, '-_', '+/')), true)['iss']);
     }
 
     public function test_test_connection_reports_the_app_or_a_stable_error()

@@ -59,7 +59,7 @@ class FetchGitHubArchiveJob implements ShouldQueue
 
             // Verify again: the workspace may have disconnected GitHub, or the project switched repositories, since the request.
             if ($source->workspace_id !== $import->workspace_id || $source->github_repository_id !== $import->github_repository_id
-                || ! $source->installation->isLinkedTo($import->workspace_id)) {
+                || ! $source->installation->allowsRepository($import->workspace_id, $source->github_repository_id)) {
                 throw GitHubError::of('github.permission_revoked');
             }
             GitHubRepositories::assertUsable($source->installation);

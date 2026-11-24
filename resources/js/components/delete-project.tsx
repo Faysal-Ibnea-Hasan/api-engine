@@ -1,4 +1,5 @@
 import { Form } from '@inertiajs/react';
+import { TriangleAlert } from 'lucide-react';
 import ProjectController from '@/actions/App/Http/Controllers/Projects/ProjectController';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
@@ -26,6 +27,7 @@ export default function DeleteProject({
             <Heading
                 variant="small"
                 title="Delete project"
+                icon={TriangleAlert}
                 description="Permanently remove this project and everything imported for it."
             />
             <div className="space-y-3 rounded-lg border border-destructive/20 bg-destructive/5 p-4">

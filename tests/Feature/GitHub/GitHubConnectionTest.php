@@ -6,6 +6,7 @@ use App\Domain\Workspaces\WorkspaceRole;
 use App\Models\AuditEvent;
 use App\Models\GitHubConnectionAttempt;
 use App\Models\GitHubInstallation;
+use App\Models\Project;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -44,8 +45,10 @@ class GitHubConnectionTest extends TestCase
         $response = $this->actingAs($user ?? $this->owner)->post("/workspaces/{$this->workspace->id}/integrations/github/connect");
         $response->assertRedirect();
         $location = (string) $response->headers->get('Location');
-        $this->assertStringStartsWith('https://github.com/apps/api-engine-test/installations/new?state=', $location);
+        $this->assertStringStartsWith('https://github.com/login/oauth/authorize?', $location);
         parse_str((string) parse_url($location, PHP_URL_QUERY), $query);
+        $this->assertSame(route('github.callback'), $query['redirect_uri']);
+        $this->assertNotEmpty($query['client_id']);
 
         return (string) $query['state'];
     }
@@ -102,7 +105,7 @@ class GitHubConnectionTest extends TestCase
         $this->assertNotNull(GitHubConnectionAttempt::query()->sole()->consumed_at);
 
         $audit = AuditEvent::query()->where('event_type', 'github.installation_connected')->sole();
-        $this->assertEquals(['installation_id' => 501, 'account_login' => 'acme'], $audit->metadata); // MySQL reorders JSON keys
+        $this->assertEquals(['installation_id' => 501, 'account_login' => 'acme', 'scope' => 'all'], $audit->metadata); // MySQL reorders JSON keys
 
         // The user token and the code were used once and never kept.
         $stored = json_encode([DB::table('github_installations')->get(), DB::table('github_connection_attempts')->get(), DB::table('audit_events')->get()]);
@@ -173,13 +176,87 @@ class GitHubConnectionTest extends TestCase
         $this->assertSame(0, DB::table('workspace_github_installations')->count());
     }
 
-    public function test_denied_authorization_and_missing_installation_ids_are_refused()
+    public function test_denied_authorization_and_malformed_installation_ids_are_refused()
     {
         $this->returnFromGitHub($this->start(), ['error' => 'access_denied', 'code' => null])->assertSessionHas('inertia.flash_data.toast.type', 'error');
-        $this->returnFromGitHub($this->start(), ['installation_id' => 'abc']);
-        $this->returnFromGitHub($this->start(), ['installation_id' => null]);
+        $this->returnFromGitHub($this->start(), ['installation_id' => 'abc'])->assertSessionHas('inertia.flash_data.toast.type', 'error');
+        $this->returnFromGitHub($this->start(), ['installation_id' => '0'])->assertSessionHas('inertia.flash_data.toast.type', 'error');
 
         $this->assertSame(0, GitHubInstallation::query()->count());
+    }
+
+    public function test_an_app_already_installed_is_linked_from_the_authorization_callback_without_an_install_step()
+    {
+        // GitHub's install page never calls back for an existing installation; authorization always does.
+        $this->gh['installations'][702] = ['repos' => [9002 => 'acme/web']];
+        $this->gh['user_installations'] = [501, 702];
+
+        $this->returnFromGitHub($this->start(), ['installation_id' => null, 'setup_action' => null])
+            ->assertRedirect("/workspaces/{$this->workspace->id}/integrations/github")
+            ->assertSessionHas('inertia.flash_data.toast.type', 'success');
+
+        $this->assertEqualsCanonicalizing([501, 702], GitHubInstallation::query()->pluck('github_installation_id')->all());
+        $this->assertSame(2, DB::table('workspace_github_installations')->where('workspace_id', $this->workspace->id)->count());
+    }
+
+    public function test_a_collaborator_on_another_accounts_installation_gets_only_the_repositories_they_can_reach()
+    {
+        // acme (account 88) installed the app on 9001 and 9002; this GitHub user (77) is a collaborator on 9002 only.
+        $this->gh['installations'] = [702 => ['account' => 88, 'repos' => [9001 => 'acme/api', 9002 => 'acme/web']]];
+        $this->gh['user_installations'] = [702];
+        $this->gh['user_repos'] = [702 => [9002]];
+
+        $this->returnFromGitHub($this->start(), ['installation_id' => null, 'setup_action' => null])->assertSessionHas('inertia.flash_data.toast.type', 'success');
+
+        $installation = GitHubInstallation::query()->sole();
+        $this->assertSame([9002], GitHubInstallation::allowedIds(DB::table('workspace_github_installations')->value('repository_ids')));
+
+        $project = Project::factory()->create(['workspace_id' => $this->workspace->id]);
+        $this->getJson("/projects/{$project->id}/github/installations/{$installation->id}/repositories")->assertOk()
+            ->assertJsonCount(1)->assertJsonPath('0.id', 9002);
+        $this->putJson("/projects/{$project->id}/github/source", ['installation_id' => $installation->id, 'repository_id' => 9001])
+            ->assertNotFound()->assertJsonPath('error.code', 'github.repository_not_allowed');
+        $this->put("/projects/{$project->id}/github/source", ['installation_id' => $installation->id, 'repository_id' => 9002])->assertRedirect();
+    }
+
+    public function test_an_installation_on_another_account_where_the_user_reaches_no_repository_is_not_linked()
+    {
+        $this->gh['installations'] = [702 => ['account' => 88, 'repos' => [9001 => 'acme/api']]];
+        $this->gh['user_installations'] = [702];
+        $this->gh['user_repos'] = [702 => []];
+
+        $response = $this->returnFromGitHub($this->start(), ['installation_id' => null, 'setup_action' => null]);
+
+        $this->assertStringStartsWith('https://github.com/apps/api-engine-test/installations/new?state=', (string) $response->headers->get('Location'));
+        $this->assertSame(0, DB::table('workspace_github_installations')->count());
+    }
+
+    public function test_installations_of_other_apps_are_never_linked()
+    {
+        $this->gh['user_installation_app_id'] = 999;
+
+        $response = $this->returnFromGitHub($this->start(), ['installation_id' => null, 'setup_action' => null]);
+
+        $this->assertStringStartsWith('https://github.com/apps/api-engine-test/installations/new?state=', (string) $response->headers->get('Location'));
+        $this->assertSame(0, GitHubInstallation::query()->count());
+    }
+
+    public function test_with_nothing_installed_the_browser_goes_on_to_install_and_that_callback_links_it()
+    {
+        $this->gh['user_installations'] = [];
+
+        $response = $this->returnFromGitHub($this->start(), ['installation_id' => null, 'setup_action' => null]);
+        $location = (string) $response->headers->get('Location');
+        $this->assertStringStartsWith('https://github.com/apps/api-engine-test/installations/new?state=', $location);
+        $this->assertSame(0, GitHubInstallation::query()->count());
+
+        // The install step needs its own fresh, single-use state, bound to the same user and workspace.
+        parse_str((string) parse_url($location, PHP_URL_QUERY), $query);
+        $this->gh['user_installations'] = [501];
+        $this->returnFromGitHub((string) $query['state'])->assertSessionHas('inertia.flash_data.toast.type', 'success');
+        $this->returnFromGitHub((string) $query['state'])->assertSessionHas('inertia.flash_data.toast.type', 'error');
+
+        $this->assertTrue(GitHubInstallation::query()->where('github_installation_id', 501)->sole()->isLinkedTo($this->workspace->id));
     }
 
     public function test_two_workspaces_with_their_own_installations_never_see_each_other()

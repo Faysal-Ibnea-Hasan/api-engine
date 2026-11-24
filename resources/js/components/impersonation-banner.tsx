@@ -21,12 +21,12 @@ export function ImpersonationBanner() {
 
     return (
         <div
-            className="flex flex-wrap items-center gap-3 border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-50"
+            className="flex flex-wrap items-center gap-3 border-b border-warning/30 bg-warning/10 px-4 py-2 text-sm text-warning"
             role="status"
             data-test="impersonation-banner"
         >
-            <UserRoundCog className="size-4 shrink-0" />
-            <p className="min-w-0 flex-1">
+            <UserRoundCog aria-hidden="true" className="size-4 shrink-0" />
+            <p className="min-w-0 flex-1 wrap-anywhere">
                 Logged in as <strong>{impersonation.member.name}</strong> (
                 {impersonation.member.email}) in{' '}
                 <strong>{impersonation.workspace.name}</strong>. Actions use
@@ -36,12 +36,17 @@ export function ImpersonationBanner() {
                 type="button"
                 size="sm"
                 variant="outline"
-                className="border-amber-400 bg-white hover:bg-amber-100 dark:bg-amber-950 dark:hover:bg-amber-900"
                 disabled={processing}
                 onClick={stop}
             >
-                <Undo2 />
-                Return to {impersonation.owner.name}
+                <Undo2 aria-hidden="true" />
+                Return to{' '}
+                <span
+                    className="max-w-48 truncate"
+                    title={impersonation.owner.name}
+                >
+                    {impersonation.owner.name}
+                </span>
             </Button>
         </div>
     );

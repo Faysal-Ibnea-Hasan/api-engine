@@ -29,6 +29,11 @@ class GitHubCallbackController extends Controller
             return $current === null ? to_route('workspaces.index') : to_route('workspaces.github.show', $current->workspace_id);
         }
 
+        // No installation of the app on any account this user can access yet: go install it (that callback comes back here).
+        if (is_string($workspace)) {
+            return redirect()->away($workspace);
+        }
+
         Inertia::flash('toast', ['type' => 'success', 'message' => __('GitHub connected.')]);
 
         return to_route('workspaces.github.show', $workspace);

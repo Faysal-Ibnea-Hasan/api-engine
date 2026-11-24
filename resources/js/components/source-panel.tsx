@@ -107,7 +107,7 @@ export default function SourcePanel({
     return (
         <section className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
-                <Heading variant="small" title="Source" />
+                <Heading variant="small" title="Source" icon={Upload} />
                 {sources.canImportFixture && !active && (
                     <Button
                         variant="outline"

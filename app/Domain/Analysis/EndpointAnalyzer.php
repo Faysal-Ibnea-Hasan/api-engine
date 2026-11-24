@@ -3,6 +3,8 @@
 namespace App\Domain\Analysis;
 
 use App\Domain\Analysis\Shape\ContractBuilder;
+use App\Domain\Analysis\Shape\Interpreter;
+use App\Domain\Analysis\Shape\Recorder;
 use App\Domain\Discovery\ParsedFile;
 use App\Domain\Discovery\SnapshotPaths;
 use App\Domain\Discovery\ValueResolver;
@@ -36,12 +38,26 @@ class EndpointAnalyzer // not final: tests swap in a broken result
     /** @var array<string, array{verdict: string, kind: string, status: string, credentials: list<string>, note: string|null, rejects: list<int>, evidence: list<string>}> per analysis */
     private array $inspected = [];
 
+    /**
+     * Recorder bound overrides (maxFanout, maxNodes, maxSeconds) for the advanced profile.
+     *
+     * @var array<string, int|float>
+     */
+    public array $graphLimits = [];
+
     public function __construct(private readonly SnapshotReader $reader) {}
 
-    /** @return array<string, mixed> the AnalysisResultV1 envelope plus 'status' (completed | partial) */
-    public function analyze(SourceSnapshot $snapshot, ApiEndpoint $endpoint, string $root): array
+    /**
+     * @param  string  $profile  basic | advanced (advanced adds the optional `graph`; every other field is the same)
+     * @return array<string, mixed> the AnalysisResultV1 envelope plus 'status' (completed | partial)
+     */
+    public function analyze(SourceSnapshot $snapshot, ApiEndpoint $endpoint, string $root, string $profile = EndpointAnalyses::BASIC): array
     {
         $evidence = new Evidence;
+        $recorder = $profile === EndpointAnalyses::ADVANCED ? new Recorder($evidence) : null;
+        foreach ($recorder === null ? [] : $this->graphLimits as $bound => $value) {
+            $recorder->{$bound} = $value;
+        }
         $unresolved = [];
         $fields = [];
         $headers = [];
@@ -127,7 +143,34 @@ class EndpointAnalyzer // not final: tests swap in a broken result
         // The full contract: payload, curl, and every success and error body, followed through the app.
         $formRequest = array_values(array_filter($dependencies, fn ($d) => $d['kind'] === 'form_request'))[0]['class'] ?? null;
         $contract = (new ContractBuilder($index, $this->reader, $snapshot, $root))
-            ->build($endpoint, $method === null ? null : $owner, $method, $controller, $fields, array_values($headers), $stack, $signals, $formRequest);
+            ->build($endpoint, $method === null ? null : $owner, $method, $controller, $fields, array_values($headers), $stack, $signals, $formRequest, $recorder);
+
+        $graph = null;
+        if ($recorder !== null) {
+            // The route and its FormRequest, as the router sees them; the rest was recorded while following the action.
+            $routeId = 'route:'.$endpoint->route_identity;
+            $recorder->node($routeId, ['type' => 'route', 'label' => trim(implode('|', (array) $endpoint->methods).' '.$endpoint->uri)]);
+            $recorder->root($routeId);
+            $recorder->at($endpoint->source_path, $routeSha, null, max(1, (int) $endpoint->source_line), max(1, (int) $endpoint->source_line));
+            if ($controller !== null && $method !== null) {
+                $actionId = $controller->fqcn.'::'.$method->name->toString();
+                $recorder->node($actionId, ['type' => 'controller', 'label' => class_basename($controller->fqcn).'::'.$method->name->toString(), 'class' => $controller->fqcn, 'method' => $method->name->toString()]);
+                $recorder->edge($actionId, 'handled_by');
+                $recorder->end();
+                if ($formRequest !== null) {
+                    $recorder->root($actionId);
+                    $recorder->at($owner->file->path, $owner->sha256, $owner->symbol($method->name->toString()), $method->getStartLine(), $method->getStartLine());
+                    $recorder->node($formRequest, ['type' => 'form_request', 'label' => class_basename($formRequest), 'class' => $formRequest]);
+                    $recorder->edge($formRequest, 'validates_with');
+                    $recorder->end();
+                }
+            } else {
+                $recorder->unresolved('no_action', $endpoint->handler_type === 'closure' ? 'Inline closure route: only controller actions are traced' : 'No controller action was found to trace', null, null, 'handled_by');
+                $recorder->end();
+            }
+            $graph = $recorder->graph((bool) ($contract['budget_reached'] ?? false), ['depth' => Interpreter::MAX_DEPTH, 'steps' => Interpreter::MAX_STEPS]);
+            $graph['root'] = $routeId;
+        }
 
         return [
             'schema_version' => self::SCHEMA_VERSION,
@@ -142,6 +185,7 @@ class EndpointAnalyzer // not final: tests swap in a broken result
             'evidence' => $evidence->all(),
             'unresolved' => array_values(array_unique($unresolved)),
             'contract' => $contract,
+            ...($graph === null ? [] : ['graph' => $graph]),
             'status' => $method !== null && $unresolved === [] ? 'completed' : 'partial',
         ];
     }

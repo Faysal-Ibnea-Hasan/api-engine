@@ -113,11 +113,15 @@ trait FakesGitHub
         }
 
         if ($host === 'github.com' && $path === '/login/oauth/access_token') {
-            return Http::response(['access_token' => self::USER_TOKEN, 'token_type' => 'bearer']);
+            // GitHub answers form-encoded unless JSON is asked for explicitly.
+            return $request->hasHeader('Accept', 'application/json')
+                ? Http::response(['access_token' => self::USER_TOKEN, 'token_type' => 'bearer'])
+                : Http::response('access_token='.self::USER_TOKEN.'&token_type=bearer', 200, ['Content-Type' => 'application/x-www-form-urlencoded']);
         }
 
         if ($host === 'codeload.github.com') {
             $this->assertFalse($request->hasHeader('Authorization'), 'the installation token must never go to the archive host');
+            $this->assertStringContainsString('token='.self::CODELOAD_TOKEN, $url, 'the signed archive URL must be requested as given');
             $sha = basename($path);
 
             return Http::response($this->zipBytes($this->gh['archives'][$sha] ?? [], 'acme-api-'.substr($sha, 0, 7)), 200, ['Content-Type' => 'application/zip']);
@@ -148,7 +152,23 @@ trait FakesGitHub
         }
 
         if ($path === '/user/installations') {
-            return Http::response(['total_count' => 1, 'installations' => array_map(fn (int $id) => ['id' => $id, 'app_id' => $this->gh['user_installation_app_id'] ?? (int) self::APP_ID], $this->gh['user_installations'])]);
+            return Http::response(['total_count' => 1, 'installations' => array_map(fn (int $id) => [
+                'id' => $id,
+                'app_id' => $this->gh['user_installation_app_id'] ?? (int) self::APP_ID,
+                'account' => ['id' => $this->gh['installations'][$id]['account'] ?? 77],
+            ], $this->gh['user_installations'])]);
+        }
+
+        // The GitHub user behind the user token; by default they own account 77, where installations live unless set otherwise.
+        if ($path === '/user') {
+            return Http::response(['id' => $this->gh['user_id'] ?? 77, 'login' => 'octo']);
+        }
+
+        // Repositories of an installation this GitHub user can reach (a collaborator reaches only some).
+        if (preg_match('#^/user/installations/(\d+)/repositories$#', $path, $m) === 1) {
+            $repos = $this->gh['user_repos'][(int) $m[1]] ?? array_keys($this->gh['installations'][(int) $m[1]]['repos'] ?? []);
+
+            return Http::response(['total_count' => count($repos), 'repositories' => array_map(fn (int $id) => ['id' => $id], $repos)]);
         }
 
         if ($path === '/installation/repositories') {

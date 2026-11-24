@@ -199,7 +199,10 @@ export default function GitHubSource({
 
             {github.source && !picking && (
                 <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3 text-sm">
-                    <GitBranch className="size-4 text-muted-foreground" />
+                    <GitBranch
+                        aria-hidden="true"
+                        className="size-4 text-muted-foreground"
+                    />
                     <span className="font-medium">
                         {github.source.fullName}
                     </span>
@@ -235,7 +238,7 @@ export default function GitHubSource({
             )}
 
             {canBrowse && (
-                <div className="grid gap-3 rounded-lg border bg-card p-4 sm:grid-cols-2">
+                <div className="grid items-start gap-3 rounded-lg border bg-card p-4 sm:grid-cols-2">
                     <div className="grid gap-2">
                         <Label htmlFor="github-installation">
                             Account or organization
@@ -273,6 +276,17 @@ export default function GitHubSource({
                                 </option>
                             ))}
                         </NativeSelect>
+                        {!loading && repositories?.length === 0 && (
+                            <p className="text-sm text-muted-foreground">
+                                This GitHub account gives API Engine no
+                                repositories. On GitHub, open the app's
+                                Configure page for this account and grant
+                                repositories. The app only sees repositories on
+                                accounts where it is installed; being a
+                                collaborator elsewhere is not enough. ZIP upload
+                                works for anything else.
+                            </p>
+                        )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
                         <Button
@@ -313,7 +327,7 @@ export default function GitHubSource({
                             Missing a repository? Grant access on GitHub (
                             {manageUrl ? (
                                 <a
-                                    className="underline underline-offset-4"
+                                    className="rounded-sm underline underline-offset-4 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                                     href={manageUrl}
                                 >
                                     Configure
@@ -439,7 +453,7 @@ export default function GitHubSource({
                             )}
                             {item.snapshotId && (
                                 <Link
-                                    className="ml-auto underline underline-offset-4"
+                                    className="ml-auto rounded-sm underline underline-offset-4 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                                     href={SnapshotController.show({
                                         project: projectId,
                                         snapshot: item.snapshotId,

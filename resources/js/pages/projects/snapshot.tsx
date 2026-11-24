@@ -1,4 +1,5 @@
 import { Head, Link } from '@inertiajs/react';
+import { FileArchive, FileCode } from 'lucide-react';
 import ProjectController from '@/actions/App/Http/Controllers/Projects/ProjectController';
 import ErrorPanel from '@/components/error-panel';
 import FrameworkDetectionCard from '@/components/framework-detection-card';
@@ -61,6 +62,7 @@ export default function ShowSnapshot({
                 <Heading
                     title="Source snapshot"
                     description={`An immutable copy of ${project.name}'s source. It never changes once ready.`}
+                    icon={FileArchive}
                 />
 
                 <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 rounded-lg border p-3 text-sm lg:grid-cols-[max-content_1fr_max-content_1fr]">
@@ -120,6 +122,7 @@ export default function ShowSnapshot({
                         <Heading
                             variant="small"
                             title={`Files (${files.total})`}
+                            icon={FileCode}
                         />
                         <ul className="divide-y rounded-lg border bg-card text-sm">
                             {files.data.map((file) => (

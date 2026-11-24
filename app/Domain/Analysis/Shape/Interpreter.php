@@ -14,6 +14,7 @@ use PhpParser\Node\Expr;
 use PhpParser\Node\Scalar;
 use PhpParser\Node\Stmt;
 use PhpParser\NodeFinder;
+use PhpParser\PrettyPrinter\Standard;
 
 /**
  * Abstract interpreter: evaluates the app's PHP over typed shapes instead of values. Nothing is
@@ -23,9 +24,9 @@ use PhpParser\NodeFinder;
  */
 final class Interpreter
 {
-    private const MAX_DEPTH = 13;
+    public const MAX_DEPTH = 13;
 
-    private const MAX_STEPS = 400000;
+    public const MAX_STEPS = 400000;
 
     private const JSON_RESOURCE = 'Illuminate\Http\Resources\Json\JsonResource';
 
@@ -56,6 +57,9 @@ final class Interpreter
     public array $inputs = [];
 
     public bool $budgetHit = false;
+
+    /** Advanced profile: records the workflow graph while interpreting. Null: nothing is recorded. */
+    public ?Recorder $recorder = null;
 
     /** The endpoint's path without a leading slash ("api/v1/orders/1"): decides $request->is('api/*'). */
     public string $requestPath = '';
@@ -204,7 +208,9 @@ final class Interpreter
             }
             if ($stmt instanceof Stmt\Expression) {
                 if ($stmt->expr instanceof Expr\Throw_) {
-                    $this->throwShape($this->eval($stmt->expr->expr, $frame));
+                    $thrown = $this->eval($stmt->expr->expr, $frame);
+                    $this->recorder !== null && $this->recordThrow($thrown, $frame, $stmt);
+                    $this->throwShape($thrown);
 
                     return [$returns, null];
                 }
@@ -244,7 +250,7 @@ final class Interpreter
                 $body = clone $frame;
                 $this->assignTo($stmt->valueVar, $this->itemOf($source), $body);
                 $stmt->keyVar !== null && $this->assignTo($stmt->keyVar, $this->keyOf($source), $body);
-                [$more, $after] = $this->exec($stmt->stmts, $body);
+                [$more, $after] = $this->branch(fn () => $this->exec($stmt->stmts, $body)); // may run zero times
                 array_push($returns, ...$more);
                 $after !== null && $after->jump = null;
                 $frame = $after === null ? $frame : Frame::merge($frame, $after);
@@ -255,7 +261,7 @@ final class Interpreter
                 foreach ($stmt instanceof Stmt\For_ ? $stmt->init : [] as $init) {
                     $this->eval($init, $frame);
                 }
-                [$more, $after] = $this->exec($stmt->stmts, clone $frame);
+                [$more, $after] = $this->branch(fn () => $this->exec($stmt->stmts, clone $frame), ! $stmt instanceof Stmt\Do_);
                 array_push($returns, ...$more);
                 $after !== null && $after->jump = null;
                 $frame = $after === null ? $frame : Frame::merge($frame, $after);
@@ -276,13 +282,16 @@ final class Interpreter
                 $subject = $this->eval($stmt->cond, $frame);
                 $falls = [];
                 $matched = false;
+                $undecided = false;
                 foreach ($stmt->cases as $case) {
                     $test = $case->cond === null ? null : $this->truth($this->compare($subject, $this->eval($case->cond, $frame), true));
                     if ($test === false && ! $matched) {
                         continue;
                     }
                     $matched = $matched || $test === true;
-                    [$more, $after] = $this->exec(array_filter($case->stmts, fn ($s) => ! $s instanceof Stmt\Break_), clone $frame);
+                    $conditional = $undecided || $test !== true;
+                    $undecided = $undecided || $test === null;
+                    [$more, $after] = $this->branch(fn () => $this->exec(array_filter($case->stmts, fn ($s) => ! $s instanceof Stmt\Break_), clone $frame), $conditional);
                     array_push($returns, ...$more);
                     $after !== null && $falls[] = $after;
                     if ($test === true) {
@@ -359,15 +368,18 @@ final class Interpreter
         $branches[] = [null, $stmt->else->stmts ?? []];
 
         $skipped = clone $frame; // the path where every condition so far was false
+        $undecided = false; // an earlier condition could go either way: this branch may not be reached
         foreach ($branches as [$cond, $body]) {
-            $truth = $cond === null ? true : $this->truth($this->eval($cond, $skipped));
+            $truth = $cond === null ? true : $this->truth($this->branch(fn () => $this->eval($cond, $skipped), $undecided));
             if ($truth === false) {
                 continue; // provably not taken
             }
             $branchFrame = clone $skipped;
             $cond !== null && $this->narrow($cond, $branchFrame);
             $cond !== null && $this->narrowFalse($cond, $skipped);
-            [$more, $after] = $this->exec($body, $branchFrame);
+            $conditional = $undecided || $truth === null;
+            $undecided = $conditional;
+            [$more, $after] = $this->branch(fn () => $this->exec($body, $branchFrame), $conditional);
             array_push($returns, ...$more);
             $after !== null && $falls[] = $after;
             if ($truth === true) {
@@ -400,7 +412,7 @@ final class Interpreter
                 if ($this->catches($catch, $exception)) {
                     $catchFrame = clone $frame;
                     $catch->var instanceof Expr\Variable && is_string($catch->var->name) && $catchFrame->vars[$catch->var->name] = $exception;
-                    [$more, $catchAfter] = $this->exec($catch->stmts, $catchFrame);
+                    [$more, $catchAfter] = $this->branch(fn () => $this->exec($catch->stmts, $catchFrame));
                     array_push($returns, ...$more);
                     $catchAfter !== null && $falls[] = $catchAfter;
                     $caught = true;
@@ -417,7 +429,7 @@ final class Interpreter
                 $catchFrame = clone $frame;
                 $catch->var instanceof Expr\Variable && is_string($catch->var->name)
                     && $catchFrame->vars[$catch->var->name] = ['k' => 'exception', 'class' => ClassInfo::name($catch->types[0]), 'status' => null, 'message' => Shape::string()];
-                [$more, $catchAfter] = $this->exec($catch->stmts, $catchFrame);
+                [$more, $catchAfter] = $this->branch(fn () => $this->exec($catch->stmts, $catchFrame));
                 array_push($returns, ...$more);
                 $catchAfter !== null && $falls[] = $catchAfter;
             }
@@ -611,10 +623,10 @@ final class Interpreter
             $e instanceof Expr\Empty_ => $this->not($this->eval($e->expr, $f)),
             $e instanceof Expr\Instanceof_ => $this->instanceOf($e, $f),
             $e instanceof Expr\Match_ => $this->match($e, $f),
-            $e instanceof Expr\FuncCall => $this->funcCall($e, $f),
-            $e instanceof Expr\MethodCall, $e instanceof Expr\NullsafeMethodCall => $this->methodCall($e, $f),
-            $e instanceof Expr\StaticCall => $this->staticCall($e, $f),
-            $e instanceof Expr\New_ => $this->newObject($e, $f),
+            $e instanceof Expr\FuncCall => $this->traced($e, $f, fn () => $this->funcCall($e, $f)),
+            $e instanceof Expr\MethodCall, $e instanceof Expr\NullsafeMethodCall => $this->traced($e, $f, fn () => $this->methodCall($e, $f)),
+            $e instanceof Expr\StaticCall => $this->traced($e, $f, fn () => $this->staticCall($e, $f)),
+            $e instanceof Expr\New_ => $this->traced($e, $f, fn () => $this->newObject($e, $f)),
             $e instanceof Expr\Closure, $e instanceof Expr\ArrowFunction => ['k' => 'closure', 'node' => $e, 'class' => $f->class, 'vars' => $f->vars, 'self' => $f->self],
             $e instanceof Expr\ErrorSuppress => $this->eval($e->expr, $f),
             $e instanceof Expr\PreInc, $e instanceof Expr\PostInc, $e instanceof Expr\PreDec, $e instanceof Expr\PostDec => Shape::int(),
@@ -627,7 +639,9 @@ final class Interpreter
 
     private function throwExpr(Expr\Throw_ $e, Frame $f): array
     {
-        $this->throwShape($this->eval($e->expr, $f));
+        $thrown = $this->eval($e->expr, $f);
+        $this->recorder !== null && $this->recordThrow($thrown, $f, $e);
+        $this->throwShape($thrown);
 
         return Shape::unknown('never: throws');
     }
@@ -1067,7 +1081,7 @@ final class Interpreter
             return $left;
         }
 
-        return Shape::union([self::withoutNull($left), $this->eval($e->right, $f)]);
+        return Shape::union([self::withoutNull($left), $this->branch(fn () => $this->eval($e->right, $f), $this->truth($left) !== false)]);
     }
 
     private function mayBeNull(array $s): bool
@@ -1095,7 +1109,7 @@ final class Interpreter
             if ($l === false) {
                 return Shape::literal(false);
             }
-            $r = $this->truth($this->eval($e->right, $f));
+            $r = $this->truth($this->branch(fn () => $this->eval($e->right, $f), $l === null));
 
             return $l === true && $r !== null ? Shape::literal($r) : ($r === false ? Shape::literal(false) : Shape::bool());
         }
@@ -1104,7 +1118,7 @@ final class Interpreter
             if ($l === true) {
                 return Shape::literal(true);
             }
-            $r = $this->truth($this->eval($e->right, $f));
+            $r = $this->truth($this->branch(fn () => $this->eval($e->right, $f), $l === null));
 
             return $l === false && $r !== null ? Shape::literal($r) : ($r === true ? Shape::literal(true) : Shape::bool());
         }
@@ -1196,7 +1210,7 @@ final class Interpreter
         return match ($truth) {
             true => $if ?? $this->eval($e->if, $f),
             false => $this->eval($e->else, $f),
-            null => Shape::union([$if ?? $this->eval($e->if, $f), $this->eval($e->else, $f)]),
+            null => Shape::union([$if ?? $this->branch(fn () => $this->eval($e->if, $f)), $this->branch(fn () => $this->eval($e->else, $f))]),
         };
     }
 
@@ -1237,9 +1251,10 @@ final class Interpreter
     {
         $subject = $this->eval($e->cond, $f);
         $out = [];
+        $undecided = false;
         foreach ($e->arms as $arm) {
             if ($arm->conds === null) {
-                $out[] = $this->eval($arm->body, $f);
+                $out[] = $this->branch(fn () => $this->eval($arm->body, $f), $undecided);
 
                 break;
             }
@@ -1249,8 +1264,9 @@ final class Interpreter
                 $hit = $t === true ? true : ($hit ?? $t);
             }
             if ($hit !== false) {
-                $out[] = $this->eval($arm->body, $f);
+                $out[] = $this->branch(fn () => $this->eval($arm->body, $f), $undecided || $hit === null);
             }
+            $undecided = $undecided || $hit === null;
             if ($hit === true) {
                 break;
             }
@@ -1299,12 +1315,15 @@ final class Interpreter
         }
         if ($e->name instanceof Expr) {
             $callee = $this->eval($e->name, $f);
+            $callee['k'] === 'closure' || $this->recorder?->unresolved('dynamic_function', 'Dynamic function call: the callable is chosen at runtime', $this->source($e));
 
             return $callee['k'] === 'closure' ? $this->callClosure($callee, $this->args($e->args, $f), $f->depth) : Shape::unknown('dynamic function call');
         }
 
         $name = strtolower($e->name->getLast());
         $args = $this->args($e->args, $f);
+        $this->recorder !== null && in_array($name, ['dispatch', 'dispatch_sync', 'dispatch_now', 'event', 'broadcast'], true)
+            && $this->recordDispatch($args[0] ?? null, $name === 'event' || $name === 'broadcast' ? 'event' : 'job', $name !== 'dispatch');
         $a = fn (int $i, ?string $named = null) => $args[$named] ?? $args[$i] ?? null;
         $lit = function (int $i) use ($a) {
             $v = $a($i);
@@ -1318,8 +1337,8 @@ final class Interpreter
             'env' => $a(1) !== null ? Shape::union([$a(1), Shape::string()]) : Shape::scalar(['null', 'string']),
             'translate', '__', 'trans', 'trans_choice', '_t', 'translate_message' => $this->translate($lit(0)),
             'abort' => $this->abort($a(0) ?? Shape::literal(500), $a(1) ?? Shape::string()),
-            'abort_if' => ($this->truth($a(0) ?? Shape::bool()) !== false ? $this->abortSide($a(1) ?? Shape::literal(500), $a(2) ?? Shape::string()) : Shape::null()),
-            'abort_unless' => ($this->truth($a(0) ?? Shape::bool()) !== true ? $this->abortSide($a(1) ?? Shape::literal(500), $a(2) ?? Shape::string()) : Shape::null()),
+            'abort_if' => (($t = $this->truth($a(0) ?? Shape::bool())) !== false ? $this->branch(fn () => $this->abortSide($a(1) ?? Shape::literal(500), $a(2) ?? Shape::string()), $t === null) : Shape::null()),
+            'abort_unless' => (($t = $this->truth($a(0) ?? Shape::bool())) !== true ? $this->branch(fn () => $this->abortSide($a(1) ?? Shape::literal(500), $a(2) ?? Shape::string()), $t === null) : Shape::null()),
             'collect' => ['k' => 'collection', 'item' => $this->itemOf($a(0) ?? Shape::emptyList())],
             'request' => $args === [] ? ['k' => 'request'] : $this->input(is_string($lit(0)) ? $lit(0) : ''),
             'auth' => ['k' => 'guard', 'name' => is_string($lit(0)) ? $lit(0) : null],
@@ -1401,10 +1420,14 @@ final class Interpreter
     private function resolveClass(mixed $class, Frame $f): array
     {
         if (! is_string($class)) {
+            $this->recorder?->unresolved('container_name', 'Container lookup by a runtime name: the service is chosen at runtime');
+
             return Shape::unknown('app() resolves a service by name');
         }
         $info = $this->index->find($class);
         if ($info === null) {
+            $this->recorder !== null && $this->recordOpaque($class, null);
+
             return Shape::unknown("service {$class} {$this->index->missingReason($class)}");
         }
 
@@ -1423,18 +1446,31 @@ final class Interpreter
         if ($fn === null) {
             return Shape::unknown("function {$name}() is not defined in the app");
         }
+        $to = null;
+        if ($this->recorder !== null) {
+            $to = 'fn:'.$name;
+            $this->recorder->node($to, ['type' => 'service', 'label' => $fn[1]->name->toString().'()', 'class' => null, 'method' => $fn[1]->name->toString()]);
+        }
         if ($f->depth >= self::MAX_DEPTH) {
+            $to !== null && $this->recorder->edge($to, 'calls', ['reason' => 'bound_depth', 'note' => 'Bound reached: call depth '.self::MAX_DEPTH.'; not followed further']);
+
             return Shape::unknown('call chain too deep');
         }
         $key = 'fn:'.$name.'#'.md5(serialize($this->memoArgs($args)));
         if (isset($this->active[$key])) {
+            $to !== null && $this->recorder->edge($to, 'calls', ['reason' => 'cycle', 'note' => 'Recursive call: already on the call path, so it is not followed again']);
+
             return Shape::unknown('recursive call');
         }
+        $to !== null && $this->recorder->edge($to, 'calls');
         if (! isset($this->memo[$key])) {
             $this->active[$key] = 1;
+            $this->recorder?->begin($key, (string) $to);
             $this->memo[$key] = $this->run($fn[0], $fn[1], $args, null, $f->depth + 1);
+            $this->recorder?->end();
             unset($this->active[$key]);
         }
+        $this->recorder?->replay($key);
         foreach ($this->memo[$key]['throws'] as $t) {
             $this->throwShape($t);
         }
@@ -1581,7 +1617,7 @@ final class Interpreter
             return Shape::list(Shape::unknown('array_map callback'));
         }
 
-        return Shape::list($this->callClosure($fn, [$this->itemOf($array)], $f->depth));
+        return Shape::list($this->branch(fn () => $this->callClosure($fn, [$this->itemOf($array)], $f->depth)));
     }
 
     private function listish(?array $s): array
@@ -1675,6 +1711,8 @@ final class Interpreter
         if (! $e->name instanceof Node\Identifier) {
             $computed = Shape::toPhp($this->eval($e->name, $f));
             if (! is_string($computed)) {
+                $this->recorder?->unresolved('dynamic_method', 'Dynamic method name: the method is chosen at runtime', $this->source($e));
+
                 return Shape::unknown('method call with a computed name');
             }
             $e = $e instanceof Expr\NullsafeMethodCall ? new Expr\NullsafeMethodCall($e->var, new Node\Identifier($computed), $e->args) : new Expr\MethodCall($e->var, new Node\Identifier($computed), $e->args);
@@ -1682,10 +1720,12 @@ final class Interpreter
         $object = $this->eval($e->var, $f);
         $name = $e->name instanceof Node\Identifier ? $e->name->toString() : '';
         $args = $this->args($e->args, $f);
+        $nullsafe = $e instanceof Expr\NullsafeMethodCall && $this->mayBeNull($object);
+        $this->recorder !== null && $this->recordMethod($name, $args);
 
-        $result = $this->callOn($object, $name, $args, $f);
+        $result = $this->branch(fn () => $this->callOn($object, $name, $args, $f), $nullsafe); // ?-> runs only when not null
 
-        return $e instanceof Expr\NullsafeMethodCall && $this->mayBeNull($object) ? Shape::nullable($result) : $result;
+        return $nullsafe ? Shape::nullable($result) : $result;
     }
 
     /** @param array<int|string, array<string, mixed>> $args */
@@ -1722,7 +1762,7 @@ final class Interpreter
             'paginator' => match ($m) {
                 'items', 'getcollection' => $m === 'items' ? Shape::list($object['item']) : ['k' => 'collection', 'item' => $object['item']],
                 'total', 'currentpage', 'lastpage', 'perpage', 'count', 'firstitem', 'lastitem' => in_array($m, ['firstitem', 'lastitem'], true) ? Shape::scalar(['integer', 'null']) : Shape::int(),
-                'through', 'map', 'transform' => ['k' => 'paginator', 'item' => ($c = $a(0)) && $c['k'] === 'closure' ? $this->callClosure($c, [$object['item']], $f->depth) : $object['item']],
+                'through', 'map', 'transform' => ['k' => 'paginator', 'item' => ($c = $a(0)) && $c['k'] === 'closure' ? $this->branch(fn () => $this->callClosure($c, [$object['item']], $f->depth)) : $object['item']],
                 'hasmorepages', 'onfirstpage', 'isempty', 'isnotempty' => Shape::bool(),
                 'nextpageurl', 'previouspageurl' => Shape::scalar(['null', 'string']),
                 'toarray' => $this->json($object),
@@ -1872,20 +1912,20 @@ final class Interpreter
             $m = strtolower($name);
             $a = fn (int $i) => array_values($args)[$i] ?? null;
             if (in_array($m, ['when', 'unless'], true)) {
-                return ['k' => 'optional', 'value' => $a(1) !== null && $a(1)['k'] === 'closure' ? $this->callClosure($a(1), [], $f->depth) : ($a(1) ?? Shape::null()),
+                return ['k' => 'optional', 'value' => $a(1) !== null && $a(1)['k'] === 'closure' ? $this->branch(fn () => $this->callClosure($a(1), [], $f->depth), $this->truth($a(0) ?? Shape::bool()) === null) : ($a(1) ?? Shape::null()),
                     'when' => $this->truth($a(0) ?? Shape::bool()), 'unless' => $m === 'unless', 'default' => $a(2)];
             }
             if (in_array($m, ['whenloaded', 'whennotnull', 'whenhas', 'whencounted', 'whenaggregated'], true)) {
                 $relation = $a(0) === null ? null : Shape::toPhp($a(0));
                 $resource = $object['props']['resource'] ?? null;
-                $value = $a(1) !== null ? ($a(1)['k'] === 'closure' ? $this->callClosure($a(1), [], $f->depth) : $a(1))
+                $value = $a(1) !== null ? ($a(1)['k'] === 'closure' ? $this->branch(fn () => $this->callClosure($a(1), [], $f->depth)) : $a(1))
                     : ($m === 'whenloaded' && is_string($relation) && $resource !== null ? $this->propertyOf($resource, $relation, $f) : ($a(0) ?? Shape::null()));
 
                 return ['k' => 'optional', 'value' => $m === 'whencounted' ? Shape::int() : $value, 'when' => null, 'unless' => false, 'default' => $a(2)];
             }
             if (in_array($m, ['mergewhen', 'mergeunless', 'merge'], true)) {
                 $value = $m === 'merge' ? $a(0) : $a(1);
-                $value = $value !== null && $value['k'] === 'closure' ? $this->callClosure($value, [], $f->depth) : $value;
+                $value = $value !== null && $value['k'] === 'closure' ? $this->branch(fn () => $this->callClosure($value, [], $f->depth), $m !== 'merge' && $this->truth($a(0) ?? Shape::bool()) === null) : $value;
 
                 return ['k' => 'merge', 'value' => $value ?? Shape::object([]), 'when' => $m === 'merge' ? true : $this->truth($a(0) ?? Shape::bool())];
             }
@@ -1901,10 +1941,14 @@ final class Interpreter
         }
 
         if ($info === null) {
+            $this->recorder !== null && $this->recordOpaque($object['class'], $name);
+
             return $this->frameworkObjectCall($object, $name, $args);
         }
         $found = $this->index->method($info, $name);
         if ($found === null) {
+            $this->recorder !== null && $this->recordOpaque($object['class'], $name, true);
+
             return $this->frameworkObjectCall($object, $name, $args);
         }
 
@@ -1941,20 +1985,39 @@ final class Interpreter
      * @param  array<int|string, array<string, mixed>>  $args
      * @param  array<string, mixed>|null  $self
      */
-    private function callMethod(ClassInfo $owner, Stmt\ClassMethod $method, array $args, ?array $self, int $depth): array
+    private function callMethod(ClassInfo $owner, Stmt\ClassMethod $method, array $args, ?array $self, int $depth, string $edge = 'calls'): array
     {
+        $to = null;
+        $declared = [];
+        if ($this->recorder !== null) {
+            $to = $this->methodNode($owner, $method->name->toString());
+            // No call site (a resource serialized on the way out): cite the method itself.
+            $declared = ['fallback' => [$owner->file->path, $owner->sha256, $to, $method->getStartLine(), $method->getStartLine()]];
+        }
         if ($depth >= self::MAX_DEPTH) {
+            $to !== null && $this->recorder->edge($to, $edge, $declared + ['reason' => 'bound_depth', 'note' => 'Bound reached: call depth '.self::MAX_DEPTH.'; not followed further']);
+
             return Shape::unknown('call chain too deep ('.$owner->symbol($method->name->toString()).')');
         }
         $key = $owner->fqcn.'::'.$method->name->toString().'#'.md5(serialize([$this->memoArgs($args), $this->memoArgs([$self ?? []])]));
         if (isset($this->active[$key])) {
+            $to !== null && $this->recorder->edge($to, $edge, $declared + ['reason' => 'cycle', 'note' => 'Recursive call: already on the call path, so it is not followed again']);
+
             return Shape::unknown('recursive call');
+        }
+        if ($to !== null) {
+            $method->stmts === null
+                ? $this->recorder->unresolved('abstract_method', "Polymorphic call: {$owner->fqcn}::{$method->name->toString()}() is abstract; the class that runs is chosen at runtime")
+                : $this->recorder->edge($to, $edge, $declared);
         }
         if (! isset($this->memo[$key])) {
             $this->active[$key] = 1;
+            $this->recorder?->begin($key, (string) $to);
             $this->memo[$key] = $this->run($owner, $method, $args, $self, $depth + 1);
+            $this->recorder?->end();
             unset($this->active[$key]);
         }
+        $this->recorder?->replay($key);
         foreach ($this->memo[$key]['throws'] as $t) {
             $this->throwShape($t);
         }
@@ -1975,11 +2038,14 @@ final class Interpreter
                 return $this->staticCall(new Expr\StaticCall(new Node\Name\FullyQualified(ltrim($class, '\\')), $e->name, $e->args), $f);
             }
             $object = $this->eval($e->class, $f);
+            in_array($object['k'], ['instance', 'model'], true)
+                || $this->recorder?->unresolved('dynamic_class', 'Dynamic class: the class is chosen at runtime', $this->source($e));
 
             return in_array($object['k'], ['instance', 'model'], true) ? $this->callOn($object, $e->name->toString(), $this->args($e->args, $f), $f) : $this->debugComputed($f, $object);
         }
         if (! $e->name instanceof Node\Identifier) {
             $name = Shape::toPhp($this->eval($e->name, $f));
+            is_string($name) || $this->recorder?->unresolved('dynamic_method', 'Dynamic method name: the method is chosen at runtime', $this->source($e));
 
             return is_string($name) ? $this->staticCall(new Expr\StaticCall($e->class, new Node\Identifier($name), $e->args), $f)
                 : Shape::unknown('static call with a computed method name');
@@ -1991,6 +2057,7 @@ final class Interpreter
         $class = $this->className($e->class, $f);
         $base = strtolower(class_basename($class));
         $a = fn (int $i, ?string $named = null) => $args[$named] ?? $args[$i] ?? null;
+        $this->recorder !== null && $this->recordStatic($class, $base, $m, $args);
 
         // parent::toArray() in a JsonResource returns the wrapped resource as an array
         if ($raw === 'parent' && $m === 'toarray' && $f->self !== null && $this->isA($f->self['class'] ?? '', self::JSON_RESOURCE)
@@ -2044,6 +2111,8 @@ final class Interpreter
     private function newObject(Expr\New_ $e, Frame $f): array
     {
         if (! $e->class instanceof Node\Name) {
+            $this->recorder?->unresolved('dynamic_class', 'Dynamic class: new with a class chosen at runtime', $this->source($e));
+
             return Shape::unknown('dynamic class');
         }
         $class = $this->className($e->class, $f);
@@ -2077,7 +2146,9 @@ final class Interpreter
         if ($ctor !== null && $f->depth < self::MAX_DEPTH) {
             $frame = new Frame($ctor[0], [], $object, $f->depth + 1);
             $this->bindParams($ctor[1]->params, $args, $frame);
+            $this->recorder?->begin(null, $class.'::__construct'); // constructor wiring is not part of the workflow
             $this->exec($ctor[1]->stmts ?? [], $frame);
+            $this->recorder?->end();
             $object = $frame->self ?? $object;
         }
 
@@ -2103,7 +2174,9 @@ final class Interpreter
         if ($info !== null && ($ctor = $this->index->method($info, '__construct')) !== null && $f->depth < self::MAX_DEPTH) {
             $frame = new Frame($ctor[0], [], ['k' => 'instance', 'class' => $class, 'props' => []], $f->depth + 1);
             $this->bindParams($ctor[1]->params, $args, $frame);
+            $this->recorder?->begin(null, $class.'::__construct');
             $this->exec($ctor[1]->stmts ?? [], $frame);
+            $this->recorder?->end();
             $exception['props'] = $frame->self['props'] ?? [];
         }
 
@@ -2113,8 +2186,10 @@ final class Interpreter
     private function abort(array $status, array $message): array
     {
         $code = Shape::toPhp($status);
-        $this->throwShape(['k' => 'exception', 'class' => $code === 404 ? 'Symfony\Component\HttpKernel\Exception\NotFoundHttpException' : 'Symfony\Component\HttpKernel\Exception\HttpException',
-            'status' => is_int($code) ? $code : null, 'message' => $message]);
+        $exception = ['k' => 'exception', 'class' => $code === 404 ? 'Symfony\Component\HttpKernel\Exception\NotFoundHttpException' : 'Symfony\Component\HttpKernel\Exception\HttpException',
+            'status' => is_int($code) ? $code : null, 'message' => $message];
+        $this->recorder !== null && $this->recordThrow($exception + ['abort' => true]);
+        $this->throwShape($exception);
 
         return Shape::unknown('never: aborts');
     }
@@ -2165,9 +2240,10 @@ final class Interpreter
             return $this->json($inner, $depth + 1);
         }
 
-        $value = $this->callMethod($found[0], $found[1], [['k' => 'request']], $resource, $depth);
+        $value = $this->applyConditionals($this->callMethod($found[0], $found[1], [['k' => 'request']], $resource, $depth, 'responds_with'));
+        $this->recorder !== null && $this->recordFields($found[0], $found[1], $value);
 
-        return $this->json($this->applyConditionals($value), $depth + 1);
+        return $this->json($value, $depth + 1);
     }
 
     /** Resolve the markers JsonResource::filter() handles: optional values and merges. */
@@ -2341,7 +2417,7 @@ final class Interpreter
         $item = $c['item'];
         $fn = array_values($args)[0] ?? null;
         $a1 = array_values($args)[1] ?? null;
-        $mapped = fn () => $fn !== null && $fn['k'] === 'closure' ? $this->callClosure($fn, [$item, Shape::scalar(['integer', 'string'])], $f->depth) : $item;
+        $mapped = fn () => $fn !== null && $fn['k'] === 'closure' ? $this->branch(fn () => $this->callClosure($fn, [$item, Shape::scalar(['integer', 'string'])], $f->depth)) : $item;
 
         return match ($m) {
             'map', 'transform', 'mapinto' => ['k' => 'collection', 'item' => $mapped()],
@@ -2367,6 +2443,7 @@ final class Interpreter
         $model = $b['model'];
         $row = $model === null ? Shape::unknown('row of table '.($b['table'] ?? '?').' (DB::table rows are not modelled)') : ['k' => 'model', 'class' => $model, 'with' => $b['with']];
         $a = fn (int $i) => array_values($args)[$i] ?? null;
+        $this->recorder !== null && $this->recordQuery($model, $b['table'] ?? null, $m);
 
         if (in_array($m, ['with', 'load'], true)) {
             $relations = [];
@@ -2414,8 +2491,9 @@ final class Interpreter
     private function failsAs404(string $m, array $row, ?string $model): array
     {
         if (in_array($m, ['firstorfail', 'findorfail'], true)) {
-            $this->throwShape(['k' => 'exception', 'class' => 'Illuminate\Database\Eloquent\ModelNotFoundException', 'status' => 404,
-                'message' => Shape::string(), 'model' => $model]);
+            $exception = ['k' => 'exception', 'class' => 'Illuminate\Database\Eloquent\ModelNotFoundException', 'status' => 404, 'message' => Shape::string(), 'model' => $model];
+            $this->recorder !== null && $this->branch(fn () => $this->recordThrow($exception)); // only when no row matches
+            $this->throwShape($exception);
         }
 
         return $row;
@@ -2425,6 +2503,7 @@ final class Interpreter
     {
         $m = strtolower($name);
         $info = $this->index->find($model['class']);
+        $this->recorder !== null && $this->recordModelCall($model['class'], $m);
 
         if (in_array($m, ['load', 'loadmissing'], true)) {
             return $this->builderCall(['k' => 'builder', 'model' => $model['class'], 'with' => $model['with']], 'with', $args, $f)['with'] === []
@@ -2596,5 +2675,420 @@ final class Interpreter
         }
 
         return false;
+    }
+
+    // ───────────────────────────── workflow recording (advanced profile) ─────────────────────────────
+
+    private const READS = ['first', 'find', 'sole', 'firstorfail', 'findorfail', 'firstornew', 'get', 'all', 'cursor', 'lazy', 'paginate', 'simplepaginate', 'cursorpaginate',
+        'count', 'exists', 'doesntexist', 'sum', 'avg', 'max', 'min', 'value', 'pluck', 'chunk', 'each', 'chunkbyid', 'eachbyid', 'firstwhere', 'firstor', 'findmany', 'lazybyid'];
+
+    private const WRITES = ['create', 'forcecreate', 'createmany', 'update', 'delete', 'forcedelete', 'restore', 'increment', 'decrement', 'insert', 'insertgetid', 'insertorignore',
+        'upsert', 'updateorcreate', 'firstorcreate', 'updateorinsert', 'save', 'savemany', 'attach', 'detach', 'sync', 'syncwithoutdetaching', 'toggle', 'associate', 'dissociate', 'truncate'];
+
+    /** Framework and library code: calls into it are not part of the app's workflow. */
+    private const FRAMEWORK = ['illuminate\\', 'symfony\\', 'carbon\\', 'psr\\', 'laravel\\', 'nesbot\\'];
+
+    /**
+     * Evaluates a call with its source location as the current site, so edges it records cite it.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $fn
+     * @return T
+     */
+    private function traced(Expr $e, Frame $f, callable $fn): mixed
+    {
+        if ($this->recorder === null) {
+            return $fn();
+        }
+        $previous = $this->recorder->at($f->class->file->path, $f->class->sha256, $f->class->fqcn, $e->getStartLine(), $e->getEndLine());
+        try {
+            return $fn();
+        } finally {
+            $this->recorder->restore($previous);
+        }
+    }
+
+    /**
+     * Evaluates code that may not run on every request (a branch, a loop body, a catch).
+     *
+     * @template T
+     *
+     * @param  callable(): T  $fn
+     * @return T
+     */
+    private function branch(callable $fn, bool $conditional = true): mixed
+    {
+        if ($this->recorder === null || ! $conditional) {
+            return $fn();
+        }
+        $this->recorder->enter();
+        try {
+            return $fn();
+        } finally {
+            $this->recorder->leave();
+        }
+    }
+
+    /** The source text of an expression (shown only to roles that may read source). */
+    private function source(Node $node): string
+    {
+        return mb_substr((new Standard)->prettyPrint([$node]), 0, 200);
+    }
+
+    public function methodNode(ClassInfo $owner, string $method, ?string $type = null): string
+    {
+        $id = $owner->fqcn.'::'.$method;
+        $type ??= $this->typeOf($owner->fqcn);
+        $this->recorder?->node($id, [
+            'type' => $type,
+            'label' => $type === 'resource' && strtolower($method) === 'toarray' ? class_basename($owner->fqcn) : class_basename($owner->fqcn).'::'.$method,
+            'class' => $owner->fqcn,
+            'method' => $method,
+        ]);
+
+        return $id;
+    }
+
+    private function classNode(string $class, string $type, ?string $label = null): string
+    {
+        $this->recorder?->node($class, ['type' => $type, 'label' => $label ?? class_basename($class), 'class' => $class]);
+
+        return $class;
+    }
+
+    /**
+     * The class, its parents, interfaces and traits, from classes already read (never loads a file:
+     * the advanced profile must not change what the contract reads).
+     *
+     * @return list<string> lowercased
+     */
+    private function lineage(string $class): array
+    {
+        $names = [];
+        $current = $class;
+        for ($i = 0; $i < 8 && $current !== null; $i++) {
+            $names[] = strtolower($current);
+            $info = $this->index->cached($current);
+            if ($info === null) {
+                break;
+            }
+            foreach ($info->node instanceof Stmt\Class_ ? $info->node->implements : [] as $interface) {
+                $names[] = strtolower(ClassInfo::name($interface));
+            }
+            foreach ($info->traitNames() as $trait) {
+                $names[] = strtolower($trait);
+            }
+            $current = $info->parentName();
+        }
+
+        return $names;
+    }
+
+    /** The first parent of $class that wasn't read (from classes already read). */
+    private function unreadAncestor(string $class): ?string
+    {
+        for ($i = 0, $info = $this->index->cached($class); $info !== null && $i < 8; $i++) {
+            $parent = $info->parentName();
+            if ($parent === null) {
+                return null;
+            }
+            $info = $this->index->cached($parent);
+            if ($info === null) {
+                return $parent;
+            }
+        }
+
+        return null;
+    }
+
+    /** Node type of a class: by what it extends or implements, else by its namespace. */
+    public function typeOf(string $class): string
+    {
+        $lineage = $this->lineage($class);
+        $has = fn (string ...$needles) => array_intersect($needles, $lineage) !== [];
+        $ns = '\\'.strtolower($class);
+
+        return match (true) {
+            $has('illuminate\http\resources\json\jsonresource', 'illuminate\http\resources\json\resourcecollection') || str_contains($ns, '\resources\\') && str_ends_with($ns, 'resource') => 'resource',
+            $has('illuminate\database\eloquent\model', 'illuminate\foundation\auth\user') || str_contains($ns, '\models\\') => 'model',
+            $has('illuminate\foundation\http\formrequest') => 'form_request',
+            $has('illuminate\mail\mailable') || str_contains($ns, '\mail\\') => 'mail',
+            $has('illuminate\notifications\notification') || str_contains($ns, '\notifications\\') => 'notification',
+            str_contains($ns, '\jobs\\') => 'job',
+            str_contains($ns, '\events\\') => 'event',
+            $has('throwable', 'exception') || str_ends_with($ns, 'exception') => 'exception',
+            str_contains($ns, '\controllers\\') || str_ends_with($ns, 'controller') => 'controller',
+            default => 'service',
+        };
+    }
+
+    private function queued(string $class): bool
+    {
+        return in_array('illuminate\contracts\queue\shouldqueue', $this->lineage($class), true);
+    }
+
+    /** throw / abort / findOrFail: an exception path, with its status when the code states one. */
+    private function recordThrow(array $exception, ?Frame $f = null, ?Node $at = null): void
+    {
+        foreach ($exception['k'] === 'union' ? $exception['of'] : [$exception] as $e) {
+            if ($e['k'] !== 'exception' || ! is_string($e['class'] ?? null)) {
+                continue;
+            }
+            $status = is_int($e['status'] ?? null) ? $e['status'] : null;
+            if ($e['abort'] ?? false) {
+                $id = $this->classNode('http:'.($status ?? 'runtime'), 'exception', $status === null ? 'HTTP error, status set at runtime (abort)' : "HTTP {$status} (abort)");
+            } else {
+                $id = $this->classNode($e['class'], 'exception', class_basename($e['class']).($status === null ? '' : " (HTTP {$status})"));
+            }
+            $previous = $f !== null && $at !== null ? $this->recorder?->at($f->class->file->path, $f->class->sha256, $f->class->fqcn, $at->getStartLine(), $at->getEndLine()) : false;
+            $this->recorder?->edge($id, 'throws');
+            $previous !== false && $this->recorder?->restore($previous);
+        }
+    }
+
+    /**
+     * dispatch()/event()/Job::dispatch()/Mail::send()/notify(): a job, event, mail or notification.
+     * shortcut: an event's listeners are not traced (only the dispatch); trace EventServiceProvider/#[Listen] when needed.
+     */
+    private function recordDispatch(?array $target, string $via, bool $sync = false): void
+    {
+        $class = match ($target['k'] ?? null) {
+            'instance', 'model' => $target['class'],
+            'scalar' => is_string($target['value'] ?? null) ? $target['value'] : null, // event('order.placed')
+            default => null,
+        };
+        if (! is_string($class)) {
+            $this->recorder?->unresolved('dynamic_dispatch', 'Dispatched object built at runtime: its class is not known statically', null, null, 'dispatches');
+
+            return;
+        }
+        $type = $this->typeOf($class);
+        in_array($type, ['job', 'event', 'mail', 'notification'], true) || $type = $via;
+        $async = match ($type) {
+            'event' => false,
+            'mail' => $via === 'mail_queue' || (! $sync && $this->queued($class)),
+            default => ! $sync && $this->queued($class),
+        };
+        $note = match (true) {
+            $type === 'event' => 'Event listeners are not traced; a queued listener runs later',
+            $async => 'Queued: runs later on a worker; its order relative to other work is not known statically',
+            default => null,
+        };
+        $this->recorder?->edge($this->classNode($class, $type), 'dispatches', ['async' => $async, 'note' => $note]);
+    }
+
+    /** ->notify(new X), Mail::to()->send(new X)/->queue(new X). */
+    private function recordMethod(string $name, array $args): void
+    {
+        $m = strtolower($name);
+        $first = array_values($args)[0] ?? null;
+        $class = in_array($first['k'] ?? null, ['instance'], true) ? $first['class'] : null;
+        if (in_array($m, ['notify', 'notifynow'], true) && $class !== null) {
+            $this->recordDispatch($first, 'notification', $m === 'notifynow');
+        } elseif (in_array($m, ['send', 'sendnow', 'queue', 'later'], true) && $class !== null && in_array($this->typeOf($class), ['mail', 'notification'], true)) {
+            $this->recordDispatch($first, in_array($m, ['queue', 'later'], true) ? 'mail_queue' : 'mail', $m === 'sendnow');
+        }
+    }
+
+    /** Job::dispatch(), Bus::/Event::/Mail::/Notification::/Queue::, the Http client. */
+    private function recordStatic(string $class, string $base, string $m, array $args): void
+    {
+        $values = array_values($args);
+        $known = $this->index->find($class) !== null; // the call below looks it up too: a cache hit
+        if ($known && in_array($m, ['dispatch', 'dispatchsync', 'dispatchnow', 'dispatchif', 'dispatchunless', 'dispatchafterresponse', 'broadcast'], true)) {
+            $this->branch(fn () => $this->recordDispatch(['k' => 'instance', 'class' => $class], $this->typeOf($class) === 'event' ? 'event' : 'job', in_array($m, ['dispatchsync', 'dispatchnow'], true)),
+                in_array($m, ['dispatchif', 'dispatchunless'], true));
+
+            return;
+        }
+        if ($known) {
+            return;
+        }
+        $items = fn (?array $v) => ($v['k'] ?? null) === 'list' ? ($v['values'] ?? []) : ($v === null ? [] : [$v]);
+        match (true) {
+            $base === 'bus' && in_array($m, ['dispatch', 'dispatchsync', 'dispatchnow', 'dispatchtoqueue', 'chain', 'batch'], true) => array_map(fn ($job) => $this->recordDispatch($job, 'job', in_array($m, ['dispatchsync', 'dispatchnow'], true)), $items($values[0] ?? null)),
+            $base === 'event' && in_array($m, ['dispatch', 'until'], true) => $this->recordDispatch($values[0] ?? null, 'event', true),
+            $base === 'mail' && in_array($m, ['send', 'sendnow', 'queue', 'later'], true) => $this->recordDispatch($values[$m === 'later' ? 1 : 0] ?? null, in_array($m, ['queue', 'later'], true) ? 'mail_queue' : 'mail', $m === 'sendnow'),
+            $base === 'notification' && in_array($m, ['send', 'sendnow'], true) => $this->recordDispatch($values[1] ?? null, 'notification', $m === 'sendnow'),
+            $base === 'queue' && in_array($m, ['push', 'later', 'pushon'], true) => $this->recordDispatch($values[$m === 'push' ? 0 : 1] ?? null, 'job'),
+            $base === 'http' => $this->recorder?->edge($this->classNode('external:http', 'external', 'Outgoing HTTP request (Http client)'), 'calls'),
+            default => null,
+        };
+    }
+
+    /** A query's terminal method reads or writes its model (or table). */
+    private function recordQuery(?string $model, mixed $table, string $m): void
+    {
+        $reads = in_array($m, self::READS, true) || in_array($m, ['updateorcreate', 'firstorcreate'], true);
+        $writes = in_array($m, self::WRITES, true);
+        if (! $reads && ! $writes) {
+            return;
+        }
+        $id = $model !== null ? $this->classNode($model, 'model')
+            : $this->classNode('table:'.(is_string($table) ? $table : 'runtime'), 'model', is_string($table) ? "{$table} table (query builder)" : 'a table named at runtime (query builder)');
+        $reads && $this->recorder?->edge($id, 'reads_from');
+        $writes && $this->recorder?->edge($id, 'writes_to');
+    }
+
+    /** $model->save(), ->delete(), ->refresh() … (query methods reach recordQuery through the builder). */
+    private function recordModelCall(string $model, string $m): void
+    {
+        if (in_array($m, ['save', 'savequietly', 'update', 'updatequietly', 'delete', 'deletequietly', 'forcedelete', 'restore', 'push', 'touch'], true)) {
+            $this->recorder?->edge($this->classNode($model, 'model'), 'writes_to');
+        } elseif (in_array($m, ['fresh', 'refresh', 'load', 'loadmissing', 'loadcount'], true)) {
+            $this->recorder?->edge($this->classNode($model, 'model'), 'reads_from');
+        }
+    }
+
+    /**
+     * A call on a class the snapshot can't follow: an interface (the container picks the class),
+     * a class not read, or a library outside the app (an integration boundary).
+     */
+    private function recordOpaque(string $class, ?string $method, bool $inherited = false): void
+    {
+        $call = $class.($method === null ? '' : "::{$method}()");
+        $framework = array_filter(self::FRAMEWORK, fn ($p) => str_starts_with(strtolower(ltrim($class, '\\')), $p)) !== [];
+        if ($framework || in_array(strtolower($class), ['request', 'carbon'], true)) {
+            return;
+        }
+        if (($reason = $this->index->missingReason($class)) !== 'is not in the snapshot') {
+            $this->recorder?->unresolved('class_limit', "Not read: {$class} {$reason}");
+
+            return;
+        }
+        $status = $inherited ? 'class' : $this->index->interfaceStatus($class);
+        if ($status === 'interface') {
+            $this->recorder?->unresolved('container_binding', "Container binding resolved at runtime: {$call} ({$this->bindingNote($class)})");
+
+            return;
+        }
+        if ($status === 'missing') {
+            $this->recorder?->unresolved('missing_class', "Not in the uploaded source: {$call} (its namespace belongs to the app, but no file declares it)");
+        } elseif ($status === 'unchecked') {
+            $this->recorder?->unresolved('class_limit', "Not checked: {$call} (the per-analysis lookup limit was reached)");
+        } elseif ($inherited) {
+            // The method lives in an ancestor that isn't in the snapshot: framework ones (JsonResource's model proxy,
+            // Controller::validate()) are not workflow; a library's is a boundary the trace can't see into.
+            $ancestor = $this->unreadAncestor($class);
+            $ancestor !== null && array_filter(self::FRAMEWORK, fn ($p) => str_starts_with(strtolower($ancestor), $p)) === []
+                && $this->recorder?->unresolved('outside_snapshot', "Defined outside the uploaded source: {$call} is inherited from {$ancestor}, which is not in the snapshot");
+        } else {
+            $this->recorder?->edge($this->classNode('external:'.$class, 'external', class_basename($class).' (library outside the app)'), 'calls');
+        }
+    }
+
+    /** @var array<string, array{string, string}>|null lowercased interface => [concrete, provider] from the app's and modules' providers */
+    private ?array $bindings = null;
+
+    /** @var array<string, true> providers that bind with a computed abstract name (e.g. a loop over files) */
+    private array $computedBinders = [];
+
+    private function bindingNote(string $interface): string
+    {
+        if ($this->bindings === null) {
+            $this->bindings = [];
+            $paths = [...$this->reader->paths($this->snapshot, SnapshotPaths::join($this->root, 'app/Providers'), like: '%.php'),
+                ...$this->reader->paths($this->snapshot, SnapshotPaths::join($this->root, 'Modules'), like: '%/Providers/%.php')];
+            foreach (array_slice($paths, 0, 200) as $path) { // shortcut: at most 200 provider files are scanned for bindings
+                $code = $this->reader->read($this->snapshot, $path);
+                if ($code === null || strlen($code) > 262144) {
+                    continue;
+                }
+                $parsed = ParsedFile::parse($path, mb_scrub($code, 'UTF-8'), $this->root);
+                $const = fn (?Node $n) => $n instanceof Expr\ClassConstFetch && $n->class instanceof Node\Name && $n->name instanceof Node\Identifier && strtolower($n->name->toString()) === 'class' ? ClassInfo::name($n->class) : null;
+                foreach ((new NodeFinder)->find($parsed->stmts, fn (Node $n) => ($n instanceof Expr\MethodCall || $n instanceof Expr\StaticCall) && $n->name instanceof Node\Identifier
+                    && in_array(strtolower($n->name->toString()), ['bind', 'singleton', 'scoped', 'bindif', 'singletonif', 'scopedif'], true)) as $call) {
+                    /** @var Expr\MethodCall|Expr\StaticCall $call */
+                    $first = ($call->args[0] ?? null) instanceof Node\Arg ? $call->args[0]->value : null;
+                    $abstract = $const($first);
+                    $concrete = ($call->args[1] ?? null) instanceof Node\Arg ? ($const($call->args[1]->value) ?? 'a factory closure') : $abstract;
+                    if ($abstract !== null) {
+                        $this->bindings[strtolower($abstract)] ??= [(string) $concrete, basename($path, '.php')];
+                    } elseif ($first !== null && ! $first instanceof Scalar\String_) {
+                        $this->computedBinders[basename($path, '.php')] = true; // bind($name, …) in a loop: the interface is named at runtime
+                    }
+                }
+            }
+        }
+        $found = $this->bindings[strtolower(ltrim($interface, '\\'))] ?? null;
+
+        return match (true) {
+            $found !== null => "{$found[1]} binds it to {$found[0]}; not followed, since the binding can change at runtime",
+            $this->computedBinders !== [] => 'no static binding found; providers bind classes by names computed at runtime: '.implode(', ', array_slice(array_keys($this->computedBinders), 0, 3)),
+            default => 'no static binding found',
+        };
+    }
+
+    /** Which keys of a resource's toArray() are always present, and when the others are. */
+    private function recordFields(ClassInfo $owner, Stmt\ClassMethod $method, array $applied): void
+    {
+        $alts = array_values(array_filter($applied['k'] === 'union' ? $applied['of'] : [$applied], fn ($s) => $s['k'] === 'object'));
+        if ($alts === []) {
+            return;
+        }
+        $helpers = $this->resourceHelpers($method);
+        $names = [];
+        foreach ($alts as $alt) {
+            foreach (array_keys($alt['props']) as $k) {
+                $names[(string) $k] = true;
+            }
+        }
+        $fields = [];
+        foreach (array_slice(array_keys($names), 0, 100) as $name) {
+            $always = true;
+            foreach ($alts as $alt) {
+                $always = $always && array_key_exists($name, $alt['props']) && ! in_array($name, $alt['optional'], true);
+            }
+            [$helper, $expression, $argument] = $helpers[$name] ?? [null, null, null];
+            $fields[] = ['name' => $name, 'presence' => $always ? 'always' : 'conditional', 'condition' => $always ? null : self::presenceCondition($helper, $argument), 'expression' => $always ? null : $expression];
+        }
+        $this->recorder?->fields($this->methodNode($owner, $method->name->toString(), 'resource'), $fields);
+    }
+
+    /** @return array<string, array{string, string, string|null}> key => [helper, source, literal first argument] for when()/whenLoaded()/mergeWhen() in returned arrays */
+    private function resourceHelpers(Stmt\ClassMethod $method): array
+    {
+        $out = [];
+        $helper = fn (Expr $v) => $v instanceof Expr\MethodCall && $v->var instanceof Expr\Variable && $v->var->name === 'this' && $v->name instanceof Node\Identifier
+            && preg_match('/^(when\w*|unless|merge\w+)$/i', $v->name->toString()) === 1 ? strtolower($v->name->toString()) : null;
+        $first = fn (Expr\MethodCall $v) => ($v->args[0] ?? null) instanceof Node\Arg && $v->args[0]->value instanceof Scalar\String_ ? $v->args[0]->value->value : null;
+        foreach ((new NodeFinder)->findInstanceOf($method->stmts ?? [], Stmt\Return_::class) as $return) {
+            foreach ($return->expr instanceof Expr\Array_ ? $return->expr->items : [] as $item) {
+                if (($name = $helper($item->value)) === null) {
+                    continue;
+                }
+                /** @var Expr\MethodCall $call */
+                $call = $item->value;
+                if ($item->key instanceof Scalar\String_) {
+                    $out[$item->key->value] = [$name, $this->source($call), $first($call)];
+                } elseif ($item->key === null && str_starts_with($name, 'merge')) {
+                    $merged = $call->args[$name === 'merge' ? 0 : 1] ?? null;
+                    foreach ($merged instanceof Node\Arg && $merged->value instanceof Expr\Array_ ? $merged->value->items : [] as $inner) {
+                        $inner->key instanceof Scalar\String_ && $out[$inner->key->value] = [$name, $this->source($call), null];
+                    }
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    private static function presenceCondition(?string $helper, ?string $argument): string
+    {
+        $what = $argument === null ? 'the relation' : "the {$argument} relation";
+
+        return match ($helper) {
+            'whenloaded' => "only when {$what} is loaded",
+            'whencounted' => "only when {$what} count is loaded",
+            'whenaggregated' => "only when {$what} aggregate is loaded",
+            'whennotnull' => 'only when the value is not null',
+            'whenhas' => $argument === null ? 'only when the model has the attribute' : "only when the model has the {$argument} attribute",
+            'when' => 'only when a condition decided at runtime holds',
+            'unless' => 'only when a condition decided at runtime does not hold',
+            'mergewhen' => 'merged in only when a condition decided at runtime holds',
+            'mergeunless' => 'merged in only when a condition decided at runtime does not hold',
+            default => 'present on some code paths only',
+        };
     }
 }

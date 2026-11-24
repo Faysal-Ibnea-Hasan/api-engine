@@ -10,6 +10,7 @@ import {
     ResponseList,
 } from '@/components/contract-views';
 import { AuthLabel } from '@/components/endpoint-analysis';
+import { useClipboard } from '@/hooks/use-clipboard';
 import EmptyState from '@/components/empty-state';
 import Heading from '@/components/heading';
 import MethodBadge from '@/components/method-badge';
@@ -181,23 +182,15 @@ function LegacyResponses({
 }
 
 function CopyMarkdown({ markdown }: { markdown: string }) {
-    const [copied, setCopied] = useState(false);
+    const [copiedText, copy] = useClipboard();
 
     return (
         <Button
             variant="outline"
             size="sm"
-            onClick={() =>
-                navigator.clipboard
-                    ?.writeText(markdown)
-                    .then(() => {
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 1500);
-                    })
-                    .catch(() => undefined)
-            }
+            onClick={() => void copy(markdown, 'Markdown')}
         >
-            {copied ? 'Copied' : 'Copy as Markdown'}
+            {copiedText === markdown ? 'Copied' : 'Copy as Markdown'}
         </Button>
     );
 }
@@ -504,15 +497,14 @@ export default function ShowDocumentation({
                 }
             />
             <div className="flex w-full flex-col gap-4 p-4 md:p-6">
-                <div className="flex flex-wrap items-start gap-3">
-                    <Heading
-                        title="Documentation"
-                        description={`Static draft for ${project.name}, built from the analysis only (no AI).`}
-                    />
+                <Heading
+                    title="Documentation"
+                    description={`Static draft for ${project.name}, built from the analysis only (no AI).`}
+                    icon={FileText}
+                >
                     {documentation && canGenerate && (
                         <Button
-                            variant="outline"
-                            className="ml-auto"
+                            variant="secondary"
                             disabled={regenerating}
                             onClick={regenerate}
                             title="Build the documentation again from the endpoint's current analysis. Older drafts stay in the list."
@@ -520,7 +512,7 @@ export default function ShowDocumentation({
                             Regenerate
                         </Button>
                     )}
-                </div>
+                </Heading>
 
                 {documentation === null ? (
                     <EmptyState

@@ -6,7 +6,7 @@ use App\Models\GitHubAppSettings;
 
 /**
  * A short-lived RS256 JWT that authenticates as the GitHub App (iss = App ID), signed with the
- * private key from the platform settings. Never logged; the key never leaves this method.
+ * private key from the platform settings (iss is the numeric App ID, as in GitHub's examples). Never logged; the key never leaves this method.
  *
  * Deviation from the guide's "prefer a JWT library": no JWT package is installed, and RS256 is
  * one openssl_sign() call. Covered by GitHubAppJwtTest (verified with openssl_verify).
@@ -33,7 +33,7 @@ final class GitHubAppJwt
         $now = now()->getTimestamp();
         $segments = [
             self::base64url((string) json_encode(['alg' => 'RS256', 'typ' => 'JWT'])),
-            self::base64url((string) json_encode(['iat' => $now - 60, 'exp' => $now + self::LIFETIME_SECONDS, 'iss' => $settings->app_id])),
+            self::base64url((string) json_encode(['iat' => $now - 60, 'exp' => $now + self::LIFETIME_SECONDS, 'iss' => (int) $settings->app_id])),
         ];
 
         if (! openssl_sign(implode('.', $segments), $signature, $key, OPENSSL_ALGO_SHA256)) {

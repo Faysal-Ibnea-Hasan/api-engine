@@ -34,7 +34,7 @@ class Workspace extends Model
     public function githubInstallations(): BelongsToMany
     {
         return $this->belongsToMany(GitHubInstallation::class, 'workspace_github_installations', 'workspace_id', 'github_installation_id')
-            ->withPivot('connected_by')->withTimestamps();
+            ->withPivot('connected_by', 'repository_ids')->withTimestamps();
     }
 
     /** @return HasMany<WorkspaceInvitation, $this> */

@@ -23,10 +23,9 @@ export default function EmptyState({
             )}
         >
             {Icon && (
-                <Icon
-                    aria-hidden="true"
-                    className="size-6 text-muted-foreground"
-                />
+                <span className="flex size-10 items-center justify-center rounded-lg brand-gradient text-gradient-foreground">
+                    <Icon aria-hidden="true" className="size-5" />
+                </span>
             )}
             <h3 className="text-sm font-medium">{title}</h3>
             {description && (

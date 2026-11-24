@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * A GitHub App installation (provider identity, not source). It has no workspace_id: a workspace
@@ -59,6 +60,36 @@ class GitHubInstallation extends Model
         return self::query()->whereKey($id)
             ->whereHas('workspaces', fn ($q) => $q->whereKey($workspaceId))
             ->first();
+    }
+
+    /**
+     * Whether the workspace may read this repository through this installation: linked, and either the
+     * whole installation (the connecting user's own account) or one of the repositories they could reach.
+     */
+    public function allowsRepository(string $workspaceId, int $repositoryId): bool
+    {
+        $link = DB::table('workspace_github_installations')
+            ->where('workspace_id', $workspaceId)->where('github_installation_id', $this->id)->first(['repository_ids']);
+
+        if ($link === null) {
+            return false;
+        }
+
+        $allowed = self::allowedIds($link->repository_ids);
+
+        return $allowed === null || in_array($repositoryId, $allowed, true);
+    }
+
+    /** @return list<int>|null null: every repository of the installation */
+    public static function allowedIds(mixed $stored): ?array
+    {
+        if ($stored === null) {
+            return null;
+        }
+
+        $ids = is_string($stored) ? json_decode($stored, true) : $stored;
+
+        return array_values(array_filter(is_array($ids) ? $ids : [], 'is_int'));
     }
 
     public function isLinkedTo(string $workspaceId): bool

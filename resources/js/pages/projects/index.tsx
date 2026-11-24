@@ -21,19 +21,19 @@ export default function ProjectsIndex({ projects, filters, canCreate }: Props) {
         <>
             <Head title="Projects" />
             <div className="flex w-full flex-col gap-4 p-4 md:p-6">
-                <div className="flex flex-wrap items-start gap-4">
-                    <Heading
-                        title="Projects"
-                        description="APIs you document in this workspace."
-                    />
+                <Heading
+                    title="Projects"
+                    description="APIs you document in this workspace."
+                    icon={FolderKanban}
+                >
                     {canCreate && (
-                        <Button asChild className="ml-auto">
+                        <Button asChild variant="secondary">
                             <Link href={ProjectController.create()}>
                                 Create project
                             </Link>
                         </Button>
                     )}
-                </div>
+                </Heading>
 
                 <Form
                     {...ProjectController.index.form()}
@@ -58,7 +58,7 @@ export default function ProjectsIndex({ projects, filters, canCreate }: Props) {
                         <input
                             type="checkbox"
                             name="archived"
-                            className="size-4 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                            className="size-4 accent-info focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                             value="1"
                             defaultChecked={filters.archived}
                             onChange={(e) =>
@@ -103,20 +103,30 @@ export default function ProjectsIndex({ projects, filters, canCreate }: Props) {
                             <li key={project.id} className="min-w-0">
                                 <Link
                                     href={ProjectController.show(project.id)}
-                                    className="flex h-full flex-col gap-2 rounded-lg border bg-card p-4 text-sm transition-[border-color,box-shadow] outline-none hover:border-primary/40 hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                                    className="flex h-full flex-col gap-2 rounded-lg border brand-gradient-border bg-card p-4 text-sm transition-[border-color,box-shadow] outline-none hover:border-info/40 hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50"
                                 >
-                                    <span
-                                        title={project.name}
-                                        className="truncate font-medium"
-                                    >
-                                        {project.name}
+                                    <span className="flex min-w-0 items-center gap-3">
+                                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md brand-gradient text-gradient-foreground">
+                                            <FolderKanban
+                                                aria-hidden="true"
+                                                className="size-4"
+                                            />
+                                        </span>
+                                        <span className="flex min-w-0 flex-1 flex-col gap-2">
+                                            <span
+                                                title={project.name}
+                                                className="truncate font-medium"
+                                            >
+                                                {project.name}
+                                            </span>
+                                            <code
+                                                title={project.slug}
+                                                className="truncate font-mono text-code text-muted-foreground"
+                                            >
+                                                {project.slug}
+                                            </code>
+                                        </span>
                                     </span>
-                                    <code
-                                        title={project.slug}
-                                        className="truncate font-mono text-code text-muted-foreground"
-                                    >
-                                        {project.slug}
-                                    </code>
                                     <span className="flex flex-wrap items-center gap-2">
                                         <ProjectStatusBadge {...project} />
                                         {!project.setupComplete && (

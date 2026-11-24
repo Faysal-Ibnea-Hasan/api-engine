@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useClipboard } from '@/hooks/use-clipboard';
 import { cn } from '@/lib/utils';
 import type { AnalysisContract, ContractResponse, ExampleNote } from '@/types';
 
@@ -16,8 +17,17 @@ function readBaseUrl(projectId: string): string {
     }
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
-    const [copied, setCopied] = useState(false);
+function CopyButton({
+    text,
+    label,
+    what,
+}: {
+    text: string;
+    label: string;
+    what: string;
+}) {
+    const [copiedText, copy] = useClipboard();
+    const copied = copiedText === text;
 
     return (
         <Button
@@ -25,15 +35,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
             variant="outline"
             size="sm"
             aria-label={label}
-            onClick={() =>
-                navigator.clipboard
-                    ?.writeText(text)
-                    .then(() => {
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 1500);
-                    })
-                    .catch(() => undefined)
-            }
+            onClick={() => void copy(text, what)}
         >
             {copied ? (
                 <Check className="size-3" />
@@ -87,7 +89,11 @@ export function CurlBlock({
                     className="h-8 max-w-xs text-xs"
                 />
                 <span className="ml-auto">
-                    <CopyButton text={command} label="Copy curl command" />
+                    <CopyButton
+                        text={command}
+                        label="Copy curl command"
+                        what="curl command"
+                    />
                 </span>
             </div>
             <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 text-xs leading-relaxed">
@@ -257,6 +263,7 @@ export function JsonView({
                 <CopyButton
                     text={JSON.stringify(value, null, 2)}
                     label="Copy JSON"
+                    what="JSON"
                 />
             </span>
             <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 pr-20 font-mono text-xs leading-relaxed whitespace-pre">

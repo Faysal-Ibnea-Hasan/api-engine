@@ -121,6 +121,98 @@ export type AnalysisResult = {
     unresolved: string[];
     /** laravel-ast-v6+: the request followed through the app's middleware, controller and renderers */
     contract?: AnalysisContract;
+    /** advanced profile (P10): the workflow graph */
+    graph?: WorkflowGraph;
+};
+
+export type WorkflowNodeType =
+    | 'route'
+    | 'controller'
+    | 'service'
+    | 'model'
+    | 'job'
+    | 'event'
+    | 'mail'
+    | 'notification'
+    | 'resource'
+    | 'form_request'
+    | 'exception'
+    | 'external'
+    | 'unresolved';
+
+export type WorkflowEdgeKind =
+    | 'handled_by'
+    | 'validates_with'
+    | 'calls'
+    | 'reads_from'
+    | 'writes_to'
+    | 'dispatches'
+    | 'responds_with'
+    | 'throws';
+
+export type WorkflowNode = {
+    id: string;
+    type: WorkflowNodeType;
+    label: string;
+    class: string | null;
+    method: string | null;
+    /** resources: which keys of toArray() are always present, and when the others are */
+    fields?: {
+        name: string;
+        presence: 'always' | 'conditional';
+        condition: string | null;
+        /** source text, for roles that may read source only */
+        expression?: string | null;
+    }[];
+};
+
+export type WorkflowEdge = {
+    from: string;
+    to: string;
+    kind: WorkflowEdgeKind;
+    /** inside a branch, loop or catch on every path that reaches it */
+    conditional: boolean;
+    resolution: 'resolved' | 'unresolved';
+    /** why it was not followed: container_binding, dynamic_method, cycle, bound_depth … */
+    reason: string | null;
+    note: string | null;
+    /** dispatches: queued, runs later */
+    async: boolean | null;
+    /** roles that may read source only */
+    expression?: string | null;
+    refs?: { id: string; path: string; lines: [number, number] }[];
+};
+
+export type WorkflowGraph = {
+    version: string;
+    root: string | null;
+    nodes: WorkflowNode[];
+    edges: WorkflowEdge[];
+    coverage: {
+        complete: boolean;
+        nodes: number;
+        edges: number;
+        followed_calls: number;
+        unresolved: number;
+        conditional: number;
+        async: number;
+        bounds: { code: string; detail: string }[];
+        limits: Record<string, number>;
+    };
+};
+
+/** GET …/analyses/{analysis}/dependencies */
+export type WorkflowData = {
+    advanced: {
+        id: string;
+        status: EndpointAnalysisSummary['status'];
+        active: boolean;
+        failureCode: string | null;
+        stale: boolean;
+        finishedAt: string | null;
+    } | null;
+    canTrace: boolean;
+    graph: WorkflowGraph | null;
 };
 
 /** exact = stated by the code; example = typed by the code, value is runtime data; unread = structure not read */

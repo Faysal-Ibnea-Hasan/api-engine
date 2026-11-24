@@ -28,11 +28,13 @@ final class ContractBuilder
      * @param  list<array<string, mixed>>  $headers  request headers from the analysis
      * @param  array<array<string, mixed>>  $stack  middleware entries (entry, class, params), outermost first
      * @param  list<array<string, mixed>>  $signals  auth signals (to know which layers authenticate)
+     * @param  Recorder|null  $recorder  advanced profile: records the action's workflow graph (it only observes)
      * @return array<string, mixed>
      */
-    public function build(ApiEndpoint $endpoint, ?ClassInfo $owner, ?Stmt\ClassMethod $method, ?ClassInfo $controller, array $fields, array $headers, array $stack, array $signals, ?string $formRequest): array
+    public function build(ApiEndpoint $endpoint, ?ClassInfo $owner, ?Stmt\ClassMethod $method, ?ClassInfo $controller, array $fields, array $headers, array $stack, array $signals, ?string $formRequest, ?Recorder $recorder = null): array
     {
         $interpreter = new Interpreter($this->index, $this->reader, $this->snapshot, $this->root);
+        $interpreter->recorder = $recorder;
         $interpreter->requestPath = ltrim((string) preg_replace('/\{\w+\??\}/', '1', $endpoint->uri), '/');
         $interpreter->inputs = self::inputs($fields);
         $pipeline = new Pipeline($interpreter, $this->index, $this->reader, $this->snapshot, $this->root);
@@ -62,7 +64,10 @@ final class ContractBuilder
                     $args[$f['name']] = isset($f['binds']) ? ['k' => 'model', 'class' => $f['binds'], 'with' => []] : Shape::string();
                 }
             }
-            $result = $interpreter->run($owner, $method, $args, $interpreter->instantiate($controller->fqcn));
+            $self = $interpreter->instantiate($controller->fqcn);
+            $recorder?->root($interpreter->methodNode($controller, $method->name->toString(), 'controller'));
+            $result = $interpreter->run($owner, $method, $args, $self);
+            $recorder?->end();
             foreach ($result['returns'] as $return) {
                 foreach ($return['k'] === 'union' ? $return['of'] : [$return] as $r) {
                     $produced[] = ['value' => $r, 'trigger' => 'the action returns this', 'layer' => $action];

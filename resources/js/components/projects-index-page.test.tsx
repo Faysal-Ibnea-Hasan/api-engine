@@ -152,7 +152,7 @@ describe('AC42: projects card grid', () => {
                 'border',
                 'bg-card',
                 'transition-[border-color,box-shadow]',
-                'hover:border-primary/40',
+                'hover:border-info/40',
                 'hover:shadow-sm',
                 'outline-none',
                 'focus-visible:ring-[3px]',
@@ -221,5 +221,101 @@ describe('AC42: projects card grid', () => {
 
         expect(html).toContain('No projects yet');
         expect(html).not.toContain('<ul');
+    });
+});
+
+// Revision 11 (chunk 3b): card border, icon tile, name/slug column and the hero.
+describe('AC42: revision 11 additions', () => {
+    const cardLink = (i: number) =>
+        [...cards(render(P))[i].body.matchAll(/<a\b([^>]*)>/g)][0][1];
+
+    it.each([0, 1])('card %i link has the gradient border', (i) => {
+        expect(tokens(cardLink(i))).toContain('brand-gradient-border');
+    });
+
+    it.each([0, 1])('card %i holds one hidden icon tile', (i) => {
+        const body = cards(render(P))[i].body;
+        const tile = [...body.matchAll(/<span\b([^>]*)>\s*(<svg\b[^>]*>)/g)];
+
+        expect(tile).toHaveLength(1);
+        expect(tokens(tile[0][1])).toEqual(
+            expect.arrayContaining([
+                'brand-gradient',
+                'text-gradient-foreground',
+                'size-8',
+            ]),
+        );
+        expect(tile[0][2]).toContain('aria-hidden="true"');
+        expect(body.match(/<svg\b/g)).toHaveLength(1);
+    });
+
+    it.each([0, 1])(
+        'card %i keeps name and slug in one shrinking column',
+        (i) => {
+            const body = cards(render(P))[i].body;
+            const columns = [...body.matchAll(/<span\b([^>]*)>/g)].filter(
+                (m) => {
+                    const t = tokens(m[1]);
+
+                    return ['min-w-0', 'flex-1', 'flex-col', 'gap-2'].every(
+                        (x) => t.includes(x),
+                    );
+                },
+            );
+
+            expect(columns).toHaveLength(1);
+
+            const after = body.slice(columns[0].index);
+            const nameAt = after.indexOf(`title="${P[i].name}"`);
+            const codeAt = after.indexOf('<code');
+            const codeEnd = after.indexOf('</code>');
+
+            expect(nameAt).toBeGreaterThan(0);
+            expect(codeAt).toBeGreaterThan(nameAt);
+            expect(codeEnd).toBeGreaterThan(codeAt);
+        },
+    );
+
+    describe('hero', () => {
+        const hero = (html: string) => [
+            ...html.matchAll(
+                /<header\b([^>]*\bdata-slot="page-hero"[^>]*)>([\s\S]*?)<\/header>/g,
+            ),
+        ];
+
+        it('has exactly one page hero', () => {
+            expect(hero(render(P))).toHaveLength(1);
+            expect(render(P).match(/data-slot="page-hero"/g)).toHaveLength(1);
+        });
+
+        it('holds Create project as a secondary link', () => {
+            const [h] = hero(render(P));
+            const links = [
+                ...h[2].matchAll(/<a\b([^>]*)>\s*Create project\s*<\/a>/g),
+            ];
+
+            expect(links).toHaveLength(1);
+
+            const t = tokens(links[0][1]);
+
+            expect(t).toContain('bg-secondary');
+            expect(t).not.toContain('bg-primary');
+            expect(t).not.toContain('ml-auto');
+        });
+
+        it('has no Create project link anywhere outside the hero', () => {
+            const html = render(P);
+            const [h] = hero(html);
+            const outside = html.replace(h[0], '');
+
+            expect(outside).not.toMatch(/<a\b[^>]*>\s*Create project\s*<\/a>/);
+        });
+
+        it('still renders the hero, without a Create project link, when canCreate is false', () => {
+            const html = render(P, false);
+
+            expect(hero(html)).toHaveLength(1);
+            expect(html).not.toMatch(/<a\b[^>]*>\s*Create project\s*<\/a>/);
+        });
     });
 });

@@ -34,4 +34,7 @@ return [
 
     // P09: import a GitHub repository commit through the GitHub App. Needs source_snapshots.
     'git_import' => (bool) env('FEATURE_GIT_IMPORT', false),
+
+    // P10: workflow graph of an endpoint (services, models, jobs, events, resources). Needs endpoint_analysis.
+    'advanced_analysis' => (bool) env('FEATURE_ADVANCED_ANALYSIS', false),
 ];

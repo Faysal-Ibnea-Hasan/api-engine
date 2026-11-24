@@ -14,6 +14,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
+use Illuminate\Support\Str;
 use Tests\Concerns\FakesGitHub;
 use Tests\TestCase;
 
@@ -45,7 +46,7 @@ class GitHubClientTest extends TestCase
     {
         $claims = $this->claims(app(GitHubAppJwt::class)->make());
 
-        $this->assertSame(self::APP_ID, $claims['iss']);
+        $this->assertSame((int) self::APP_ID, $claims['iss']);
         $this->assertLessThanOrEqual(now()->getTimestamp() - 30, $claims['iat']); // allows clock drift
         $this->assertLessThanOrEqual(600, $claims['exp'] - now()->getTimestamp());
         $this->assertGreaterThan(now()->getTimestamp(), $claims['exp']);
@@ -97,7 +98,7 @@ class GitHubClientTest extends TestCase
         $this->gh['fail'] = ['#^/installation/repositories$#' => 401];
 
         try {
-            app(GitHubRepositories::class)->list($installation);
+            app(GitHubRepositories::class)->list($installation, (string) Str::uuid());
             $this->fail('expected an error');
         } catch (GitHubError $e) {
             $this->assertSame('github.permission_revoked', $e->errorCode());

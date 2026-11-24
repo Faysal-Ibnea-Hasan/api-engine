@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FolderKanban, Wrench } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { ResponseList } from '@/components/contract-views';
+import EmptyState from '@/components/empty-state';
 import Heading from '@/components/heading';
 import ImportStatus from '@/components/import-status';
 import MethodBadge from '@/components/method-badge';
@@ -11,7 +13,7 @@ import Progress from '@/components/progress';
 import ProjectStatusBadge from '@/components/project-status-badge';
 import ResolutionBadge from '@/components/resolution-badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
+import { Badge, badgeVariants } from '@/components/ui/badge';
 import { BreadcrumbLink } from '@/components/ui/breadcrumb';
 import { buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -22,7 +24,7 @@ import { Textarea } from '@/components/ui/textarea';
 
 // Chunk 2 kit tests: AC6, AC7, AC8, AC10, AC22 (Vitest part), AC27, AC30, AC32, AC37.
 // AC9 lives in platform-components.test.tsx, which is not edited.
-// Chunk 3 adds AC40 (contract-view status colors) at the end of the file.
+// Chunk 3 adds AC40 (contract-view status colors); chunk 3b adds AC44 (gradient and icon classes).
 
 const UI_DIR = path.join(fileURLToPath(new URL('.', import.meta.url)), 'ui');
 
@@ -863,4 +865,432 @@ describe('AC40: CopyButton is the kit Button', () => {
         expect(copyButton).toContain('size="sm"');
         expect(copyButton).not.toContain('<button');
     });
+});
+
+// ---------------------------------------------------------------------------
+// AC44: kit gradient and icon classes (chunk 3b, revision 11)
+// ---------------------------------------------------------------------------
+
+const COMPONENTS_DIR = fileURLToPath(new URL('.', import.meta.url));
+const JS_ROOT = path.join(COMPONENTS_DIR, '..');
+
+/** Class tokens of one source file (path relative to resources/js), token-split as in AC30. */
+const sourceTokens = (relPath: string) =>
+    tokenize(fs.readFileSync(path.join(JS_ROOT, relPath), 'utf8'));
+
+const svgTags = (html: string) => html.match(/<svg\b[^>]*>/g) ?? [];
+
+describe('AC44: Button default variant is solid green (revision 12)', () => {
+    // Revision 12 changed this: the default variant no longer carries `brand-gradient`
+    // (it was asserted here in revision 11); it is solid `bg-primary`.
+    it('is solid green: bg-primary, shadow tokens, no hover tint', () => {
+        const tokens = tokensOf(buttonVariants({}));
+
+        for (const t of [
+            'bg-primary',
+            'text-primary-foreground',
+            'shadow-xs',
+            'hover:shadow-md',
+        ]) {
+            expect(tokens).toContain(t);
+        }
+
+        expect(tokens).not.toContain('hover:bg-primary/90');
+    });
+
+    it.each([
+        'default',
+        'destructive',
+        'outline',
+        'secondary',
+        'ghost',
+        'link',
+    ] as const)('the %s variant has no gradient token', (variant) => {
+        expect(
+            tokensOf(buttonVariants({ variant })).filter((t) =>
+                /gradient/.test(t),
+            ),
+        ).toEqual([]);
+    });
+
+    it('the link variant is blue text, not green', () => {
+        const tokens = tokensOf(buttonVariants({ variant: 'link' }));
+
+        expect(tokens).toEqual(
+            expect.arrayContaining([
+                'text-info',
+                'underline-offset-4',
+                'hover:underline',
+            ]),
+        );
+        expect(tokens).not.toContain('text-primary');
+    });
+
+    it('keeps the AC30 transition token', () => {
+        expect(tokensOf(buttonVariants({}))).toContain(
+            'transition-[color,background-color,border-color,box-shadow,transform]',
+        );
+    });
+});
+
+describe('AC44: Heading hero', () => {
+    const html = renderToStaticMarkup(
+        <Heading title="T" description="D" icon={FolderKanban}>
+            <button>A</button>
+        </Heading>,
+    );
+
+    it('renders one root header with data-slot="page-hero"', () => {
+        expect(html.startsWith('<header ')).toBe(true);
+        expect(html.endsWith('</header>')).toBe(true);
+        expect(html.match(/<header\b/g)).toHaveLength(1);
+        expect(html.match(/data-slot="page-hero"/g)).toHaveLength(1);
+        expect(tagFor(html, 'page-hero').startsWith('<header ')).toBe(true);
+    });
+
+    it('has the hero tokens on the root', () => {
+        expect(rootTokens(html)).toEqual(
+            expect.arrayContaining([
+                'brand-gradient',
+                'text-gradient-foreground',
+                'rounded-lg',
+                'p-4',
+                'md:p-5',
+                'flex',
+                'flex-wrap',
+                'items-center',
+                '[--color-ring:var(--gradient-foreground)]',
+                // Revision 12b: fallback under the image, and the full-opacity focus ring.
+                'bg-gradient-from',
+                '[&_:focus-visible]:ring-ring!',
+            ]),
+        );
+        expect(rootTokens(html)).not.toContain('bg-primary');
+    });
+
+    it('holds one hidden svg inside the icon tile span', () => {
+        expect(svgTags(html)).toHaveLength(1);
+        expect(svgTags(html)[0]).toContain('aria-hidden="true"');
+
+        const tile = html.match(/<span\b([^>]*)>\s*<svg\b/);
+
+        expect(tile, `no icon tile span in: ${html}`).not.toBeNull();
+        expect(classTokens(tile![0])).toEqual(
+            expect.arrayContaining([
+                'bg-gradient-foreground/15',
+                'size-10',
+                'rounded-lg',
+            ]),
+        );
+    });
+
+    it('the h2 is the AC27 default set plus wrap-anywhere', () => {
+        expect(tagTokens(html, 'h2')).toEqual(
+            expect.arrayContaining([
+                'text-lg',
+                'font-semibold',
+                'tracking-tight',
+                'wrap-anywhere',
+            ]),
+        );
+    });
+
+    it('the description is text-sm, wraps anywhere and is not muted (revision 12)', () => {
+        expect(tagTokens(html, 'p')).toEqual(
+            expect.arrayContaining(['text-sm', 'wrap-anywhere']),
+        );
+        expect(tagTokens(html, 'p')).not.toContain('text-muted-foreground');
+        expect(html).toMatch(/<p\b[^>]*>D<\/p>/);
+    });
+
+    it('the text block can grow but is at least 192px wide (C0-F55)', () => {
+        const block = html.match(/<div\b([^>]*)>\s*<h2\b/);
+
+        expect(block, `no div holding the h2 in: ${html}`).not.toBeNull();
+
+        const tokens = classTokens(block![0]);
+
+        expect(tokens).toContain('min-w-48');
+        expect(tokens).toContain('flex-1');
+        expect(tokens).not.toContain('min-w-0');
+    });
+
+    it('puts the action inside the header', () => {
+        expect(html).toContain('<button>A</button>');
+        expect(html.indexOf('<button>A</button>')).toBeGreaterThan(
+            html.indexOf('<header '),
+        );
+        expect(html.indexOf('<button>A</button>')).toBeLessThan(
+            html.lastIndexOf('</header>'),
+        );
+    });
+
+    it('still passes AC10: h2, p and no mb-* on the root', () => {
+        expect(html).toMatch(/<h2\b[^>]*>T<\/h2>/);
+        expect(rootTokens(html).filter((t) => /(?:^|:)-?mb-/.test(t))).toEqual(
+            [],
+        );
+    });
+
+    it('renders no svg without an icon', () => {
+        expect(renderToStaticMarkup(<Heading title="T" />)).not.toContain(
+            '<svg',
+        );
+    });
+});
+
+describe('AC44: Heading small variant', () => {
+    const html = renderToStaticMarkup(
+        <Heading variant="small" title="S" icon={Wrench} />,
+    );
+
+    it('the h2 is the AC27 small set plus flex items-center gap-2', () => {
+        expect(tagTokens(html, 'h2')).toEqual(
+            expect.arrayContaining([
+                'text-sm',
+                'font-semibold',
+                'flex',
+                'items-center',
+                'gap-2',
+            ]),
+        );
+    });
+
+    it('holds one hidden blue svg of size-4 (revision 12b: text-info, not text-primary)', () => {
+        expect(svgTags(html)).toHaveLength(1);
+        expect(svgTags(html)[0]).toContain('aria-hidden="true"');
+        expect(classTokens(svgTags(html)[0]!)).toEqual(
+            expect.arrayContaining(['size-4', 'shrink-0', 'text-info']),
+        );
+        expect(classTokens(svgTags(html)[0]!)).not.toContain('text-primary');
+    });
+
+    it('renders children inside the header, after the h2 (revision 12)', () => {
+        const withChild = renderToStaticMarkup(
+            <Heading variant="small" title="T">
+                <button type="button">Act</button>
+            </Heading>,
+        );
+
+        expect(withChild.startsWith('<header')).toBe(true);
+        expect(withChild.endsWith('</header>')).toBe(true);
+        expect(withChild).toContain('<button type="button">Act</button>');
+        expect(withChild.indexOf('<button')).toBeGreaterThan(
+            withChild.indexOf('</h2>'),
+        );
+        expect(withChild.indexOf('</button>')).toBeLessThan(
+            withChild.lastIndexOf('</header>'),
+        );
+    });
+
+    it('is not a page hero', () => {
+        expect(html).not.toContain('page-hero');
+    });
+
+    it('renders no svg without an icon', () => {
+        expect(
+            renderToStaticMarkup(<Heading variant="small" title="S" />),
+        ).not.toContain('<svg');
+    });
+});
+
+describe('AC44: EmptyState icon tile', () => {
+    const html = renderToStaticMarkup(
+        <EmptyState icon={FolderKanban} title="X" />,
+    );
+
+    it('renders the icon in a gradient tile as one hidden svg', () => {
+        expect(svgTags(html)).toHaveLength(1);
+        expect(svgTags(html)[0]).toContain('aria-hidden="true"');
+
+        const tile = html.match(/<span\b([^>]*)>\s*<svg\b/);
+
+        expect(tile, `no icon tile span in: ${html}`).not.toBeNull();
+        expect(classTokens(tile![0])).toEqual(
+            expect.arrayContaining([
+                'brand-gradient',
+                'text-gradient-foreground',
+                'size-10',
+                'rounded-lg',
+            ]),
+        );
+    });
+});
+
+describe('AC44: shell source classes', () => {
+    it('nav-main.tsx has the gradient indicator and keeps bg-sidebar-primary', () => {
+        const tokens = sourceTokens('components/nav-main.tsx');
+
+        expect(tokens).toContain('data-[active=true]:before:brand-gradient');
+        expect(tokens).toContain(
+            'data-[active=true]:before:bg-sidebar-primary',
+        );
+    });
+
+    it('app-logo.tsx has the gradient brand mark', () => {
+        const tokens = sourceTokens('components/app-logo.tsx');
+
+        expect(tokens).toContain('brand-gradient');
+        expect(tokens).toContain('text-gradient-foreground');
+        // Revision 12b: the fallback under the image is the gradient start, not green.
+        expect(tokens).toContain('bg-gradient-from');
+        expect(tokens).not.toContain('bg-primary');
+    });
+
+    it('app-sidebar-header.tsx has the accent line and keeps h-12', () => {
+        const tokens = sourceTokens('components/app-sidebar-header.tsx');
+
+        for (const t of [
+            'relative',
+            'after:absolute',
+            'after:inset-x-0',
+            'after:-bottom-px',
+            'after:h-0.5',
+            'after:brand-gradient',
+            'h-12',
+        ]) {
+            expect(tokens).toContain(t);
+        }
+    });
+
+    it('ui/sidebar.tsx puts the page gradient behind the inset shell', () => {
+        const tokens = sourceTokens('components/ui/sidebar.tsx');
+
+        expect(tokens).toContain('has-data-[variant=inset]:page-gradient');
+        expect(tokens).toContain('group-data-[variant=inset]:bg-transparent');
+        expect(tokens).not.toContain('has-data-[variant=inset]:bg-sidebar');
+    });
+
+    it('the auth layout has the page gradient and the gradient card border', () => {
+        const tokens = sourceTokens('layouts/auth/auth-simple-layout.tsx');
+
+        expect(tokens).toContain('page-gradient');
+        expect(tokens).toContain('brand-gradient-border');
+        expect(tokens).not.toContain('bg-muted/40');
+    });
+});
+
+// Revision 12b (gate-r12): kit parts that followed --primary are blue or neutral.
+describe('AC44: Blue and neutral kit parts', () => {
+    const noPrimary = (tokens: string[]) =>
+        expect(tokens.filter((t) => t.includes('primary'))).toEqual([]);
+
+    it('ui/checkbox.tsx checks to blue', () => {
+        const tokens = sourceTokens('components/ui/checkbox.tsx');
+
+        expect(tokens).toEqual(
+            expect.arrayContaining([
+                'data-[state=checked]:bg-info',
+                'data-[state=checked]:text-info-foreground',
+                'data-[state=checked]:border-info',
+            ]),
+        );
+        noPrimary(tokens);
+    });
+
+    // TooltipContent renders through a Portal, so static markup is empty: read the source.
+    it('ui/tooltip.tsx is dark neutral: content and Arrow', () => {
+        const text = fs.readFileSync(
+            path.join(JS_ROOT, 'components/ui/tooltip.tsx'),
+            'utf8',
+        );
+        const at = text.indexOf('TooltipPrimitive.Arrow');
+
+        expect(at, 'no TooltipPrimitive.Arrow').toBeGreaterThan(0);
+
+        const content = tokenize(text.slice(0, at));
+        const arrow = tokenize(text.slice(at));
+
+        expect(content).toEqual(
+            expect.arrayContaining(['bg-foreground', 'text-background']),
+        );
+        expect(arrow).toEqual(
+            expect.arrayContaining(['bg-foreground', 'fill-foreground']),
+        );
+        noPrimary(tokenize(text));
+    });
+
+    it('the default Badge is solid blue', () => {
+        const tokens = tokensOf(badgeVariants({}));
+
+        expect(tokens).toEqual(
+            expect.arrayContaining([
+                'bg-info',
+                'text-info-foreground',
+                '[a&]:hover:bg-info/90',
+            ]),
+        );
+        noPrimary(tokens);
+    });
+
+    it('the Progress fill is blue', () => {
+        const html = renderToStaticMarkup(<Progress label="L" value={50} />);
+        const lists = allClassLists(html);
+
+        expect(lists.some((l) => l.includes('bg-info'))).toBe(true);
+        noPrimary(lists.flat());
+    });
+
+    it.each([
+        'components/ui/input.tsx',
+        'components/ui/native-select.tsx',
+        'components/ui/textarea.tsx',
+    ])('%s selects in blue', (file) => {
+        const tokens = sourceTokens(file);
+
+        expect(tokens).toEqual(
+            expect.arrayContaining([
+                'selection:bg-info',
+                'selection:text-info-foreground',
+            ]),
+        );
+        noPrimary(tokens);
+    });
+
+    it.each([
+        ['components/framework-detection-card.tsx', 2],
+        ['pages/projects/index.tsx', 1],
+        ['pages/projects/wizard.tsx', 1],
+    ])('%s: native radios and checkboxes use accent-info', (file, count) => {
+        const tokens = sourceTokens(file);
+
+        expect(
+            tokens.filter((t) => t === 'accent-info').length,
+        ).toBeGreaterThanOrEqual(count);
+        expect(tokens).not.toContain('accent-primary');
+    });
+
+    it('pages/projects/wizard.tsx: checked card border and current step are blue', () => {
+        const text = fs.readFileSync(
+            path.join(JS_ROOT, 'pages/projects/wizard.tsx'),
+            'utf8',
+        );
+
+        expect(tokenize(text)).toContain('has-checked:border-info');
+        expect(text.replace(/\s+/g, ' ')).toContain(
+            'border-info bg-info text-info-foreground',
+        );
+        noPrimary(tokenize(text));
+    });
+
+    it.each([
+        'pages/dashboard.tsx',
+        'pages/projects/index.tsx',
+        'pages/projects/show.tsx',
+    ])('%s: the card-hover border is blue (AC42)', (file) => {
+        const tokens = sourceTokens(file);
+
+        expect(tokens).toContain('hover:border-info/40');
+        expect(tokens).not.toContain('hover:border-primary/40');
+    });
+
+    it.each(['components/endpoint-analysis.tsx', 'components/zip-upload.tsx'])(
+        '%s uses border-info',
+        (file) => {
+            const tokens = sourceTokens(file);
+
+            expect(tokens).toContain('border-info');
+            expect(tokens).not.toContain('border-primary');
+        },
+    );
 });
