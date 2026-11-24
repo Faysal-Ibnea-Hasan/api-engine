@@ -18,6 +18,7 @@ enum WorkspaceRole: string
             Capability::UpdateWorkspace,
             Capability::DeleteProjects,
             Capability::ConfigureAi,
+            Capability::ManageIntegrations,
             Capability::PublishDocs => in_array($this, [self::Owner, self::Maintainer], true),
 
             Capability::ManageProjects,

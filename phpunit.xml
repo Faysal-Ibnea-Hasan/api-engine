@@ -41,5 +41,6 @@
         <env name="FEATURE_ROUTE_DISCOVERY" value="false"/>
         <env name="FEATURE_ENDPOINT_ANALYSIS" value="false"/>
         <env name="FEATURE_STATIC_DOCS" value="false"/>
+        <env name="FEATURE_GIT_IMPORT" value="false"/>
     </php>
 </phpunit>

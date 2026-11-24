@@ -380,7 +380,7 @@ export default function ProjectWizard({
                                             Slug
                                         </dt>
                                         <dd>
-                                            <code className="font-mono text-code">
+                                            <code className="font-mono text-code break-all">
                                                 {project.slug}
                                             </code>
                                         </dd>
@@ -410,7 +410,7 @@ export default function ProjectWizard({
                                                 project.framework,
                                             )}{' '}
                                             in{' '}
-                                            <code className="font-mono text-code">
+                                            <code className="font-mono text-code break-all">
                                                 {project.rootPath}
                                             </code>
                                         </dd>

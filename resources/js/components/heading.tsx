@@ -12,8 +12,8 @@ export default function Heading({
             <h2
                 className={
                     variant === 'small'
-                        ? 'mb-0.5 text-sm font-semibold'
-                        : 'text-lg font-semibold tracking-tight'
+                        ? 'mb-0.5 text-sm font-semibold wrap-anywhere'
+                        : 'text-lg font-semibold tracking-tight wrap-anywhere'
                 }
             >
                 {title}

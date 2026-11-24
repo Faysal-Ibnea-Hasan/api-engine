@@ -31,4 +31,7 @@ return [
 
     // P08: deterministic static documentation drafts from analysis results. Needs endpoint_analysis.
     'static_docs' => (bool) env('FEATURE_STATIC_DOCS', false),
+
+    // P09: import a GitHub repository commit through the GitHub App. Needs source_snapshots.
+    'git_import' => (bool) env('FEATURE_GIT_IMPORT', false),
 ];

@@ -19,4 +19,6 @@ enum Capability: string
     case PublishDocs = 'publish_docs';
     case ReadPublishedDocs = 'read_published_docs';
     case ReadSourceEvidence = 'read_source_evidence';
+    /** Connect or disconnect provider integrations such as a GitHub App installation. */
+    case ManageIntegrations = 'manage_integrations';
 }

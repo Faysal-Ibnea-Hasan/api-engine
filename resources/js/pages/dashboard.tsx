@@ -5,14 +5,21 @@ import WorkspaceController from '@/actions/App/Http/Controllers/Workspaces/Works
 import WorkspaceMemberController from '@/actions/App/Http/Controllers/Workspaces/WorkspaceMemberController';
 import EmptyState from '@/components/empty-state';
 import Heading from '@/components/heading';
+import ProjectStatusBadge from '@/components/project-status-badge';
+import TextLink from '@/components/text-link';
 import { Button } from '@/components/ui/button';
 import { dashboard } from '@/routes';
 import { edit } from '@/routes/profile';
+import type { ProjectSummary } from '@/types';
 
 const tile =
     'flex flex-col gap-1 rounded-lg border bg-card p-4 transition-[border-color,box-shadow] outline-none hover:border-primary/40 hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
-export default function Dashboard() {
+export default function Dashboard({
+    recentProjects,
+}: {
+    recentProjects?: ProjectSummary[];
+}) {
     const { workspaces, currentWorkspace, features } = usePage().props;
 
     // Feature on, but the user belongs to no workspace yet.
@@ -93,6 +100,53 @@ export default function Dashboard() {
                         </span>
                     </Link>
                 </div>
+                {recentProjects && (
+                    <section className="flex flex-col gap-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <Heading variant="small" title="Recent projects" />
+                            <TextLink
+                                href={ProjectController.index()}
+                                className="text-sm"
+                            >
+                                View all projects
+                            </TextLink>
+                        </div>
+                        {recentProjects.length === 0 ? (
+                            <EmptyState
+                                icon={FolderKanban}
+                                title="No projects yet"
+                                description="Projects your team creates will show up here."
+                            />
+                        ) : (
+                            <ul className="divide-y rounded-lg border bg-card">
+                                {recentProjects.map((project) => (
+                                    <li key={project.id}>
+                                        <Link
+                                            href={ProjectController.show(
+                                                project.id,
+                                            )}
+                                            className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm transition-[color,background-color,box-shadow] outline-none hover:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset"
+                                        >
+                                            <span
+                                                title={project.name}
+                                                className="min-w-0 truncate font-medium"
+                                            >
+                                                {project.name}
+                                            </span>
+                                            <code
+                                                title={project.slug}
+                                                className="min-w-0 truncate font-mono text-code text-muted-foreground"
+                                            >
+                                                {project.slug}
+                                            </code>
+                                            <ProjectStatusBadge {...project} />
+                                        </Link>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </section>
+                )}
             </div>
         </>
     );

@@ -5,6 +5,7 @@ namespace App\Domain\Sources;
 use App\Domain\Audit\AuditLog;
 use App\Domain\Projects\ProjectError;
 use App\Domain\Projects\ProjectService;
+use App\Events\ImportFinished;
 use App\Events\SnapshotReady;
 use App\Jobs\ImportSnapshotJob;
 use App\Models\ProcessingRun;
@@ -30,6 +31,7 @@ use Throwable;
  * The one path from staged files to an immutable snapshot, shared by every SourceProvider.
  *
  *   begin()   → run (queued) + snapshot (pending), files staged in quarantine, job dispatched
+ *   beginDeferred() + dispatchImport() → the same, for providers that fetch in a worker first (GitHub, P09)
  *   process() → claim run → validate + hash → store blobs by hash → verify → ready (one transaction)
  *
  * Content is stored by SHA-256 under a server-generated key, so untrusted paths never
@@ -53,7 +55,56 @@ final class SnapshotImporter
      * @param  Closure(Filesystem $quarantine, string $dir): void  $stage  copies the files into quarantine under $dir
      * @return array{ProcessingRun, bool} the run, and whether it was already running
      */
-    public function begin(User $actor, Project $project, SourceType $type, string $fingerprint, Closure $stage, bool $retried = false): array
+    public function begin(User $actor, Project $project, SourceType $type, string $fingerprint, Closure $stage): array
+    {
+        [$run, $alreadyRunning] = $this->start($actor, $project, $type, $fingerprint, null);
+
+        if ($alreadyRunning) {
+            return [$run, true];
+        }
+
+        try {
+            $stage($this->quarantine(), $this->quarantineDir($run));
+        } catch (Throwable $e) {
+            report($e);
+            $this->fail($run->id, 'storage_failed');
+
+            return [$run->refresh(), false];
+        }
+
+        $this->dispatchImport($run->id);
+
+        return [$run->refresh(), false];
+    }
+
+    /**
+     * Creates the run and pending snapshot without staging files or dispatching the import:
+     * the provider fetches the archive in its own worker, then calls dispatchImport().
+     *
+     * @param  Closure(ProcessingRun): void  $within  runs inside the creating transaction (e.g. to record the run's origin)
+     * @return array{ProcessingRun, bool} the run, and whether it was already running
+     */
+    public function beginDeferred(User $actor, Project $project, SourceType $type, string $fingerprint, Closure $within): array
+    {
+        return $this->start($actor, $project, $type, $fingerprint, $within);
+    }
+
+    /** Queues the import of what was staged for this run. Never leaves a queued run blocking its fingerprint. */
+    public function dispatchImport(string $runId): void
+    {
+        try {
+            ImportSnapshotJob::dispatch($runId);
+        } catch (Throwable $e) {
+            report($e);
+            $this->fail($runId, 'internal');
+        }
+    }
+
+    /**
+     * @param  (Closure(ProcessingRun): void)|null  $within
+     * @return array{ProcessingRun, bool}
+     */
+    private function start(User $actor, Project $project, SourceType $type, string $fingerprint, ?Closure $within, bool $retried = false): array
     {
         if ($project->isArchived()) {
             throw ProjectError::archived();
@@ -62,7 +113,7 @@ final class SnapshotImporter
         $activeKey = hash('sha256', ProcessingRun::KIND_SNAPSHOT_IMPORT."|{$project->id}|{$fingerprint}");
 
         try {
-            $run = DB::transaction(function () use ($actor, $project, $type, $fingerprint, $activeKey) {
+            $run = DB::transaction(function () use ($actor, $project, $type, $fingerprint, $activeKey, $within) {
                 $source = $this->sourceFor($actor, $project, $type);
 
                 $snapshot = new SourceSnapshot;
@@ -90,6 +141,8 @@ final class SnapshotImporter
 
                 AuditLog::record('source.import_started', $project->workspace, $actor, $run, ['source_type' => $type->value]);
 
+                $within && $within($run);
+
                 return $run;
             });
         } catch (UniqueConstraintViolationException $e) {
@@ -105,29 +158,14 @@ final class SnapshotImporter
                 throw $e;
             }
 
-            return $this->begin($actor, $project, $type, $fingerprint, $stage, retried: true);
+            return $this->start($actor, $project, $type, $fingerprint, $within, retried: true);
         }
 
-        try {
-            $stage($this->quarantine(), $this->quarantineDir($run));
-        } catch (Throwable $e) {
-            report($e);
-            $this->fail($run->id, 'storage_failed');
-
-            return [$run->refresh(), false];
-        }
-
-        try {
-            ImportSnapshotJob::dispatch($run->id);
-        } catch (Throwable $e) {
-            report($e);
-            $this->fail($run->id, 'internal'); // never leave a queued run blocking this fingerprint
-        }
-
-        return [$run->refresh(), false];
+        return [$run, false];
     }
 
-    private function sourceFor(User $actor, Project $project, SourceType $type): ProjectSource
+    /** The project's source row of this type, created on first use. */
+    public function sourceFor(User $actor, Project $project, SourceType $type): ProjectSource
     {
         $existing = ProjectSource::query()->where('project_id', $project->id)->where('type', $type->value)->first();
 
@@ -226,7 +264,8 @@ final class SnapshotImporter
         $this->finishUnsuccessfully($runId, $failureCode, SnapshotStatus::Failed, RunStatus::Failed);
     }
 
-    private function claim(string $runId): bool
+    /** Lets a provider's fetch worker hold the run like an import worker would (it counts as busy, and is never fetched twice). */
+    public function claim(string $runId): bool
     {
         return ProcessingRun::query()
             ->whereKey($runId)
@@ -238,6 +277,12 @@ final class SnapshotImporter
                 'started_at' => DB::raw('COALESCE(started_at, CURRENT_TIMESTAMP)'),
                 'attempts' => DB::raw('attempts + 1'),
             ]) === 1;
+    }
+
+    /** Gives up a claim without finishing, so the next worker (or the import job) can claim the run. */
+    public function release(string $runId): void
+    {
+        ProcessingRun::query()->whereKey($runId)->where('status', RunStatus::Running->value)->update(['claimed_at' => null]);
     }
 
     private function markValidating(SourceSnapshot $snapshot): void
@@ -263,8 +308,10 @@ final class SnapshotImporter
         }
 
         $attempt = $quarantine->path($this->runDir($run).'/attempt-'.Str::uuid());
+        // Provider archives (GitHub zipballs) wrap the repository in one generated folder; drop it so paths match a ZIP of the repo.
+        $unwrap = $run->source?->type === SourceType::Git;
 
-        return [$attempt, $this->zips->extract($quarantine->path($archive), $attempt)];
+        return [$attempt, $this->zips->extract($quarantine->path($archive), $attempt, $unwrap)];
     }
 
     /**
@@ -476,11 +523,23 @@ final class SnapshotImporter
 
         // Last, and guarded: later stages (detection…) must never undo or block a finished import.
         if ($finished === 1) {
+            $this->announceFinished($run->id);
+
             try {
                 SnapshotReady::dispatch($snapshot->id);
             } catch (Throwable $e) {
                 report($e);
             }
+        }
+    }
+
+    /** Lets a provider record the outcome of its own run (e.g. the GitHub import history). Never undoes the result. */
+    private function announceFinished(string $runId): void
+    {
+        try {
+            ImportFinished::dispatch($runId);
+        } catch (Throwable $e) {
+            report($e);
         }
     }
 
@@ -516,6 +575,8 @@ final class SnapshotImporter
         $this->quarantine()->deleteDirectory($this->runDir($run)); // includes the uploaded archive
 
         AuditLog::record($runStatus === RunStatus::Cancelled ? 'source.import_cancelled' : 'source.import_failed', $run->project->workspace, null, $run, ['code' => $code]);
+
+        $this->announceFinished($run->id);
     }
 
     private function checkCancelled(ProcessingRun $run): void

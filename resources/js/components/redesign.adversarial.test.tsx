@@ -31,7 +31,7 @@ import Endpoints from '@/pages/projects/endpoints';
 import ProjectsIndex from '@/pages/projects/index';
 import ShowProject from '@/pages/projects/show';
 import ShowSnapshot from '@/pages/projects/snapshot';
-import type { User } from '@/types';
+import type { ProjectSummary, User } from '@/types';
 
 // Chunk 1 adversarial tests: hostile user-controlled strings in the app shell,
 // and no new HTML injection sinks. Later chunks extend this file.
@@ -1500,5 +1500,106 @@ describe('Adversary chunk 3: loading-toast Dismiss (AC38)', () => {
         expect([...src.matchAll(/\btoast\.(\w+)\(/g)].map((m) => m[1])).toEqual(
             ['loading'],
         );
+    });
+});
+
+// Revision 10 and 10b (adversary-2): dashboard recent rows and /projects cards.
+// Dashboard is loaded lazily so the pinned C3-F9 line numbers above stay put.
+const summary = (over: Partial<ProjectSummary> = {}): ProjectSummary => ({
+    id: 'p1',
+    name: 'Billing API',
+    slug: 'billing-api',
+    status: 'active',
+    visibility: 'workspace',
+    setupComplete: true,
+    updatedAt: null,
+    ...over,
+});
+
+const NAME = 'W'.repeat(120); // ProjectDetailsRules name max:120, no spaces
+
+async function renderDashboard(rows: ProjectSummary[]) {
+    const { default: Dashboard } = await import('@/pages/dashboard');
+    const acme = workspace('w1', 'Acme');
+    page.props = {
+        ...page.props,
+        workspaces: [acme],
+        currentWorkspace: acme,
+        features: { project_wizard: true, workspace_management: true },
+    };
+
+    return renderToStaticMarkup(<Dashboard recentProjects={rows} />);
+}
+
+const renderCards = (rows: ProjectSummary[]) =>
+    renderToStaticMarkup(
+        <ProjectsIndex
+            projects={rows}
+            filters={{ q: '', archived: false }}
+            canCreate
+        />,
+    );
+
+const titleOf = (tag: string) => /\btitle="([^"]*)"/.exec(tag)?.[1];
+
+describe('Adversary chunk 3 rev10: long names and slugs in dashboard rows and cards', () => {
+    it('dashboard row: an 80-char slug truncates with a title (guard)', async () => {
+        const tag = openTagBefore(
+            await renderDashboard([summary({ slug: SLUG })]),
+            SLUG,
+            'code',
+        );
+
+        expectOneOf(tag, ['truncate']);
+        expectOneOf(tag, ['min-w-0']);
+        expect(titleOf(tag)).toBe(SLUG);
+    });
+
+    it('dashboard row: a 120-char unbroken name can shrink or wrap (C3-F10)', async () => {
+        const html = await renderDashboard([summary({ name: NAME })]);
+
+        expectOneOf(openTagBefore(html, NAME, 'span'), FLEX_OK);
+    });
+
+    it('dashboard row: no "Setup not finished" marker, even when unfinished (guard)', async () => {
+        const html = await renderDashboard([summary({ setupComplete: false })]);
+
+        expect(html).not.toContain('Setup not finished');
+    });
+
+    it('/projects card: 120-char name and 80-char slug truncate with titles; li is min-w-0 (guard)', () => {
+        const html = renderCards([summary({ name: NAME, slug: SLUG })]);
+        const name = openTagBefore(html, NAME, 'span');
+        const slug = openTagBefore(html, SLUG, 'code');
+
+        expectOneOf(name, ['truncate']);
+        expect(titleOf(name)).toBe(NAME);
+        expectOneOf(slug, ['truncate']);
+        expect(titleOf(slug)).toBe(SLUG);
+        expectOneOf(openTagBefore(html, NAME, 'li'), ['min-w-0']);
+    });
+});
+
+describe('Adversary chunk 3 rev10: HTML-like names and slugs render as text', () => {
+    it.each(XSS)('dashboard row escapes name and slug: %s', async (p) => {
+        const html = await renderDashboard([summary({ name: p, slug: p })]);
+
+        expectEscaped(html, p);
+        expect(html).toContain(`title="${XSS_ESCAPED(p)}"`);
+    });
+
+    it.each(XSS)('/projects card escapes name and slug: %s', (p) => {
+        const html = renderCards([summary({ name: p, slug: p })]);
+
+        expectEscaped(html, p);
+        expect(html.split(`title="${XSS_ESCAPED(p)}"`)).toHaveLength(3);
+    });
+
+    it('a hostile id stays inside the row href (guard)', async () => {
+        const id = '../../admin?x="><script>';
+        const html = await renderDashboard([summary({ id })]);
+
+        expect(html).not.toContain('<script>');
+        expect(html).toMatch(/href="\/projects\/[^"]*"/);
     });
 });

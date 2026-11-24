@@ -18,8 +18,11 @@ final class ZipExtractor
 
     private const ONE_MB = 1048576;
 
-    /** @return list<ManifestEntry> excluded entries */
-    public function extract(string $archive, string $destination): array
+    /**
+     * @param  bool  $unwrap  drop the single top-level folder every entry sits in (provider archives such as GitHub zipballs)
+     * @return list<ManifestEntry> excluded entries
+     */
+    public function extract(string $archive, string $destination, bool $unwrap = false): array
     {
         $this->assertZipSignature($archive);
 
@@ -29,21 +32,21 @@ final class ZipExtractor
         }
 
         try {
-            return $this->extractEntries($zip, $destination);
+            return $this->extractEntries($zip, $destination, $unwrap ? new ArchiveWrapper : null);
         } finally {
             $zip->close();
         }
     }
 
     /** @return list<ManifestEntry> */
-    private function extractEntries(ZipArchive $zip, string $destination): array
+    private function extractEntries(ZipArchive $zip, string $destination, ?ArchiveWrapper $wrapper): array
     {
         $limits = (array) config('sources.zip');
         $maxPath = (int) config('sources.max_path_length');
         $maxFile = (int) config('sources.max_file_bytes');
         $maxExtracted = (int) config('sources.max_total_bytes');
         $deadline = microtime(true) + (int) $limits['max_seconds'];
-        $sourceRoots = $this->laravelRoots($zip, $maxPath, $deadline);
+        $sourceRoots = $this->laravelRoots($zip, $maxPath, $deadline, $wrapper);
 
         if ($zip->numFiles > (int) $limits['max_entries']) {
             throw SourceRejection::tooManyFiles();
@@ -79,6 +82,13 @@ final class ZipExtractor
             $name = (string) $stat['name'];
             $isDir = str_ends_with($name, '/');
             $path = SourcePath::normalize($name, $maxPath); // rejects zip-slip, absolute and NUL paths, dirs included
+
+            if ($wrapper !== null) {
+                $path = $wrapper->strip($path, $isDir);
+                if ($path === null) {
+                    continue; // the wrapper folder itself
+                }
+            }
 
             if (substr_count($path, '/') + 1 > (int) $limits['max_depth']) {
                 throw SourceRejection::because('too_deep');
@@ -165,8 +175,10 @@ final class ZipExtractor
      *
      * @return list<string>
      */
-    private function laravelRoots(ZipArchive $zip, int $maxPath, float $deadline): array
+    private function laravelRoots(ZipArchive $zip, int $maxPath, float $deadline, ?ArchiveWrapper $wrapper): array
     {
+        $wrapper = $wrapper === null ? null : new ArchiveWrapper; // own instance: strip() remembers the folder name
+
         $markers = [];
 
         for ($i = 0; $i < $zip->numFiles; $i++) {
@@ -189,6 +201,10 @@ final class ZipExtractor
             }
 
             $path = SourcePath::normalize($name, $maxPath);
+            $path = $wrapper === null ? $path : $wrapper->strip($path, false);
+            if ($path === null) {
+                continue;
+            }
             $root = dirname($path);
             $markers[$root][$base] = true;
         }

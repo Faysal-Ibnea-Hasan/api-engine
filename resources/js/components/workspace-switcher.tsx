@@ -18,10 +18,24 @@ import {
 
 /** Renders nothing while the workspace feature is off. */
 export function WorkspaceSwitcher() {
-    const { workspaces, currentWorkspace } = usePage().props;
+    const { workspaces, currentWorkspace, impersonation } = usePage().props;
 
     if (workspaces === null) {
         return null;
+    }
+
+    if (impersonation) {
+        return (
+            <SidebarMenu>
+                <SidebarMenuItem>
+                    <SidebarMenuButton data-test="workspace-switcher" disabled>
+                        <span className="truncate font-medium">
+                            {currentWorkspace?.name ?? 'No workspace'}
+                        </span>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+            </SidebarMenu>
+        );
     }
 
     const switchTo = (id: string) =>

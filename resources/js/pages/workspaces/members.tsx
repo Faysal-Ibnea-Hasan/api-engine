@@ -2,6 +2,7 @@ import { Form, Head, router } from '@inertiajs/react';
 import { useState } from 'react';
 import WorkspaceController from '@/actions/App/Http/Controllers/Workspaces/WorkspaceController';
 import WorkspaceInvitationController from '@/actions/App/Http/Controllers/Workspaces/WorkspaceInvitationController';
+import WorkspaceImpersonationController from '@/actions/App/Http/Controllers/Workspaces/WorkspaceImpersonationController';
 import WorkspaceMemberController from '@/actions/App/Http/Controllers/Workspaces/WorkspaceMemberController';
 import EmptyState from '@/components/empty-state';
 import Heading from '@/components/heading';
@@ -45,7 +46,11 @@ type Invitation = {
 
 type Props = {
     workspace: { id: string; name: string };
-    can: { manageMembers: boolean; updateWorkspace: boolean };
+    can: {
+        manageMembers: boolean;
+        updateWorkspace: boolean;
+        impersonateMembers: boolean;
+    };
     currentRole: string;
     assignableRoles: RoleOption[];
     members: Member[];
@@ -116,6 +121,20 @@ export default function Members({
                 ),
         });
 
+    const loginAs = (member: Member) =>
+        setConfirm({
+            title: `Log in as ${member.name}?`,
+            description: `You will use ${member.name}'s permissions inside ${workspace.name}. A banner will let you return to your owner account.`,
+            action: 'Login as member',
+            run: () =>
+                router.post(
+                    WorkspaceImpersonationController.store.url({
+                        workspace: workspace.id,
+                        member: member.id,
+                    }),
+                ),
+        });
+
     return (
         <>
             <Head title={`${workspace.name} members`} />
@@ -181,6 +200,16 @@ export default function Members({
                                     </p>
                                 </div>
                                 <div className="ml-auto flex items-center gap-2">
+                                    {can.impersonateMembers &&
+                                        !member.isSelf && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => loginAs(member)}
+                                            >
+                                                Login as
+                                            </Button>
+                                        )}
                                     {canManage(member) ? (
                                         <Select
                                             value={member.role}

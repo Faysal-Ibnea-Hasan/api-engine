@@ -125,7 +125,7 @@ export default function ShowEndpoint({
                                 Defined in
                             </dt>
                             <dd>
-                                <code>
+                                <code className="break-all">
                                     {endpoint.source.path}:
                                     {endpoint.source.line}
                                 </code>

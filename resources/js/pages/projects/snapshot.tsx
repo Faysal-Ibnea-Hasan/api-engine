@@ -130,8 +130,8 @@ export default function ShowSnapshot({
                                     <code
                                         className={
                                             file.excludedReason
-                                                ? 'font-mono text-code text-muted-foreground line-through'
-                                                : 'font-mono text-code'
+                                                ? 'min-w-0 font-mono text-code break-all text-muted-foreground line-through'
+                                                : 'min-w-0 font-mono text-code break-all'
                                         }
                                     >
                                         {file.path}

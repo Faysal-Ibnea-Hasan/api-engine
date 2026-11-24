@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 use LogicException;
 
@@ -75,6 +76,12 @@ class SourceSnapshot extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class);
+    }
+
+    /** @return HasOne<GitHubImport, $this> the Git origin, for snapshots imported from GitHub (newest import wins) */
+    public function githubImport(): HasOne
+    {
+        return $this->hasOne(GitHubImport::class)->latestOfMany();
     }
 
     /** @return HasMany<SourceFile, $this> */

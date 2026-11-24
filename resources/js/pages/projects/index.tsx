@@ -98,25 +98,33 @@ export default function ProjectsIndex({ projects, filters, canCreate }: Props) {
                         }
                     />
                 ) : (
-                    <ul className="divide-y rounded-lg border bg-card">
+                    <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                         {projects.map((project) => (
-                            <li key={project.id}>
+                            <li key={project.id} className="min-w-0">
                                 <Link
                                     href={ProjectController.show(project.id)}
-                                    className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm transition-[color,background-color,box-shadow] outline-none hover:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset"
+                                    className="flex h-full flex-col gap-2 rounded-lg border bg-card p-4 text-sm transition-[border-color,box-shadow] outline-none hover:border-primary/40 hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50"
                                 >
-                                    <span className="font-medium">
+                                    <span
+                                        title={project.name}
+                                        className="truncate font-medium"
+                                    >
                                         {project.name}
                                     </span>
-                                    <code className="font-mono text-code text-muted-foreground">
+                                    <code
+                                        title={project.slug}
+                                        className="truncate font-mono text-code text-muted-foreground"
+                                    >
                                         {project.slug}
                                     </code>
-                                    <ProjectStatusBadge {...project} />
-                                    {!project.setupComplete && (
-                                        <span className="ml-auto text-sm text-muted-foreground">
-                                            Setup not finished
-                                        </span>
-                                    )}
+                                    <span className="flex flex-wrap items-center gap-2">
+                                        <ProjectStatusBadge {...project} />
+                                        {!project.setupComplete && (
+                                            <span className="text-xs text-muted-foreground">
+                                                Setup not finished
+                                            </span>
+                                        )}
+                                    </span>
                                 </Link>
                             </li>
                         ))}

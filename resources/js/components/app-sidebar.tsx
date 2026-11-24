@@ -1,5 +1,6 @@
 import { Link, usePage } from '@inertiajs/react';
-import { FolderKanban, LayoutGrid, Users } from 'lucide-react';
+import { FolderKanban, GitBranch, LayoutGrid, Users } from 'lucide-react';
+import GitHubConnectionController from '@/actions/App/Http/Controllers/GitHub/GitHubConnectionController';
 import ProjectController from '@/actions/App/Http/Controllers/Projects/ProjectController';
 import WorkspaceMemberController from '@/actions/App/Http/Controllers/Workspaces/WorkspaceMemberController';
 import AppLogo from '@/components/app-logo';
@@ -45,6 +46,17 @@ export function AppSidebar() {
                   href: WorkspaceMemberController.index(currentWorkspace.id),
                   icon: Users,
               },
+              ...(features.git_import
+                  ? [
+                        {
+                            title: 'GitHub',
+                            href: GitHubConnectionController.show(
+                                currentWorkspace.id,
+                            ),
+                            icon: GitBranch,
+                        },
+                    ]
+                  : []),
           ]
         : mainNavItems;
 

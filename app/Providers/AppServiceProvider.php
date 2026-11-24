@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Domain\GitHub\GitHubInstallationTokens;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -21,7 +22,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Installation tokens are memoized per request/job only, never in a shared cache.
+        $this->app->scoped(GitHubInstallationTokens::class);
     }
 
     /**
@@ -79,6 +81,11 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('route-scan', fn (Request $r) => Limit::perMinute(10)->by($by('route-scan', $r)));
         RateLimiter::for('endpoint-analysis', fn (Request $r) => Limit::perMinute(30)->by($by('endpoint-analysis', $r)));
         RateLimiter::for('static-docs', fn (Request $r) => Limit::perMinute(30)->by($by('static-docs', $r)));
+        RateLimiter::for('github-connect', fn (Request $r) => Limit::perMinute(10)->by($by('github-connect', $r)));
+        // Picker calls each hit GitHub: enough for browsing, not for scraping.
+        RateLimiter::for('github-browse', fn (Request $r) => Limit::perMinute(60)->by($by('github-browse', $r)));
+        RateLimiter::for('github-import', fn (Request $r) => Limit::perMinute(10)->by($by('github-import', $r)));
+        RateLimiter::for('github-app-settings', fn (Request $r) => Limit::perMinute(20)->by($by('github-app-settings', $r)));
         RateLimiter::for('invitations', fn (Request $r) => Limit::perMinute(20)->by($by('invitations', $r)));
     }
 }

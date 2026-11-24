@@ -11,6 +11,8 @@ use App\Models\ApiEndpoint;
 use App\Models\DocumentationVersion;
 use App\Models\EndpointAnalysis;
 use App\Models\FrameworkDetection;
+use App\Models\GitHubImport;
+use App\Models\GitHubRepositorySource;
 use App\Models\ProcessingRun;
 use App\Models\Project;
 use App\Models\ProjectSource;
@@ -42,7 +44,7 @@ final class ProjectDeleter
         DB::transaction(function () use ($project, &$storage, &$quarantine) {
             Project::query()->lockForUpdate()->findOrFail($project->id);
 
-            // Only work a worker is processing right now blocks deletion. Queued work no worker has
+            // Only work a worker is processing right now blocks deletion (a GitHub archive download claims its run the same way). Queued work no worker has
             // started, abandoned claims and unfinished uploads are simply discarded with the project:
             // a job that starts later finds no row to claim and stops.
             $busy = ProcessingRun::query()->where('project_id', $project->id)
@@ -75,6 +77,8 @@ final class ProjectDeleter
             RouteScan::query()->where('project_id', $project->id)->delete();
             FrameworkDetection::query()->where('project_id', $project->id)->delete();
             UploadSession::query()->where('project_id', $project->id)->delete();
+            GitHubImport::query()->where('project_id', $project->id)->delete();           // before runs, snapshots and sources: they restrict deletes
+            GitHubRepositorySource::query()->where('project_id', $project->id)->delete();
             ProcessingRun::query()->where('project_id', $project->id)->delete();
 
             $snapshots = SourceSnapshot::query()->where('project_id', $project->id)->pluck('id');

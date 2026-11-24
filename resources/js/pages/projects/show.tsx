@@ -28,6 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import type {
     EndpointsSummary,
     FrameworkDetectionData,
+    GitHubPanelData,
     ProjectDetail,
     ProjectOption,
     ProjectOptions,
@@ -39,6 +40,7 @@ type Props = {
     options: ProjectOptions;
     can: { update: boolean; delete: boolean };
     sources: SourcePanelData | null;
+    github: GitHubPanelData | null;
     framework: {
         snapshotId: string;
         detection: FrameworkDetectionData | null;
@@ -55,6 +57,7 @@ export default function ShowProject({
     options,
     can,
     sources,
+    github,
     framework,
     endpoints,
 }: Props) {
@@ -73,7 +76,7 @@ export default function ShowProject({
                             description={project.description ?? undefined}
                         />
                         <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                            <code className="font-mono text-code">
+                            <code className="min-w-0 font-mono text-code break-all">
                                 {project.slug}
                             </code>
                             <ProjectStatusBadge
@@ -138,7 +141,7 @@ export default function ShowProject({
                         <dt className="text-muted-foreground">Framework</dt>
                         <dd>
                             {labelOf(options.framework, project.framework)} in{' '}
-                            <code className="font-mono text-code">
+                            <code className="font-mono text-code break-all">
                                 {project.rootPath}
                             </code>
                         </dd>
@@ -209,6 +212,7 @@ export default function ShowProject({
                         sourcePreference={project.sourcePreference}
                         canManage={editable}
                         sources={sources}
+                        github={github}
                     />
                 ) : (
                     <EmptyState

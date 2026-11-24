@@ -1,4 +1,4 @@
-import type { Auth } from '@/types/auth';
+import type { Auth, WorkspaceImpersonation } from '@/types/auth';
 import type { CurrentWorkspace, WorkspaceSummary } from '@/types/workspace';
 
 declare module 'react' {
@@ -17,6 +17,7 @@ declare module '@inertiajs/core' {
             /** Both null while the workspace_management flag is off. */
             workspaces: WorkspaceSummary[] | null;
             currentWorkspace: CurrentWorkspace | null;
+            impersonation: WorkspaceImpersonation | null;
             [key: string]: unknown;
         };
     }

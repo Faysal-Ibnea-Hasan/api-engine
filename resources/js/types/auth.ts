@@ -12,6 +12,16 @@ export type User = {
 
 export type Auth = {
     user: User;
+    /** Only shows ops links; the server checks it on every route. */
+    isPlatformAdmin?: boolean;
+};
+
+export type WorkspaceImpersonation = {
+    active: true;
+    startedAt: string;
+    owner: { id: number; name: string };
+    member: { id: number; name: string; email: string };
+    workspace: { id: string; name: string };
 };
 
 export type Passkey = {

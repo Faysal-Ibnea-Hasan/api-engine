@@ -22,6 +22,7 @@ class PermissionMatrixTest extends TestCase
         'publish_docs' => [true,  true,  false, false, false],
         'read_published_docs' => [true,  true,  true,  true,  true],
         'read_source_evidence' => [true,  true,  true,  false, false],
+        'manage_integrations' => [true,  true,  false, false, false],
     ];
 
     /** @return iterable<string, array{Capability, list<bool>}> */

@@ -440,7 +440,10 @@ export default function Endpoints({
                                                         />
                                                     ))}
                                                 </span>
-                                                <code className="font-mono text-code font-medium">
+                                                <code
+                                                    title={e.uri}
+                                                    className="min-w-0 truncate font-mono text-code font-medium"
+                                                >
                                                     {e.domain
                                                         ? `${e.domain}`
                                                         : ''}

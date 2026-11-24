@@ -1,6 +1,6 @@
 import { Link, router, usePoll } from '@inertiajs/react';
 import { Upload } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import ProcessingRunController from '@/actions/App/Http/Controllers/Sources/ProcessingRunController';
 import SnapshotController from '@/actions/App/Http/Controllers/Sources/SnapshotController';
@@ -19,19 +19,23 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog';
+import GitHubSource from '@/components/github-source';
 import ZipUpload from '@/components/zip-upload';
 import {
     clearTrackedSourceImport,
     sourceImportToastId,
     trackedSourceImport,
 } from '@/lib/source-import-toast';
-import type { SourcePanelData } from '@/types';
+import { cn } from '@/lib/utils';
+import type { GitHubPanelData, SourcePanelData } from '@/types';
 
 type Props = {
     projectId: string;
     sourcePreference: string | null;
     canManage: boolean;
     sources: SourcePanelData;
+    /** P09: present only while Git import is enabled; ZIP works the same without it. */
+    github?: GitHubPanelData | null;
 };
 
 export default function SourcePanel({
@@ -39,7 +43,11 @@ export default function SourcePanel({
     sourcePreference,
     canManage,
     sources,
+    github = null,
 }: Props) {
+    const [method, setMethod] = useState<'zip' | 'github'>(
+        github && sourcePreference === 'git' ? 'github' : 'zip',
+    );
     const run = sources.latestRun;
     const active = run?.active ?? false;
     const runId = run?.id ?? null;
@@ -48,7 +56,7 @@ export default function SourcePanel({
     // Refresh only this panel while an import runs.
     const { start, stop } = usePoll(
         2000,
-        { only: ['sources', 'project'] },
+        { only: ['sources', 'project', 'github'] },
         { autoStart: false },
     );
 
@@ -71,7 +79,7 @@ export default function SourcePanel({
 
         if (active) {
             // sonner shows no close button on loading toasts; its cancel button dismisses them.
-            toast.loading('Validating and unpacking the uploaded source…', {
+            toast.loading('Validating and unpacking the imported source…', {
                 id,
                 cancel: { label: 'Dismiss', onClick: () => {} },
             });
@@ -120,7 +128,46 @@ export default function SourcePanel({
                 )}
             </div>
 
-            {sources.canUpload && !active && (
+            {github && (
+                <div
+                    role="tablist"
+                    aria-label="Source method"
+                    className="inline-flex w-fit gap-1 rounded-lg bg-muted p-1"
+                >
+                    {(
+                        [
+                            ['zip', 'ZIP upload'],
+                            ['github', 'GitHub repository'],
+                        ] as const
+                    ).map(([value, label]) => (
+                        <button
+                            key={value}
+                            type="button"
+                            role="tab"
+                            aria-selected={method === value}
+                            onClick={() => setMethod(value)}
+                            className={cn(
+                                'rounded-md px-3 py-1.5 text-sm transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                                method === value
+                                    ? 'bg-background shadow-xs'
+                                    : 'text-muted-foreground hover:text-foreground',
+                            )}
+                        >
+                            {label}
+                        </button>
+                    ))}
+                </div>
+            )}
+
+            {github && method === 'github' && (
+                <GitHubSource
+                    projectId={projectId}
+                    github={github}
+                    busy={active}
+                />
+            )}
+
+            {(!github || method === 'zip') && sources.canUpload && !active && (
                 <ZipUpload
                     projectId={projectId}
                     maxBytes={sources.maxUploadBytes}
@@ -192,7 +239,8 @@ export default function SourcePanel({
                     title="The last import did not complete"
                     message={run.failureMessage}
                     action={
-                        sources.canUpload ? (
+                        sources.canUpload &&
+                        !run.failureCode?.startsWith('github.') ? (
                             <span className="text-sm">
                                 {run.failureCode === 'too_large'
                                     ? `Keep analyzed source under ${formatBytes(sources.maxSourceBytes)}. Remove build output, uploads, backups, or other generated files, then upload a new ZIP.`
@@ -223,11 +271,13 @@ export default function SourcePanel({
                     icon={Upload}
                     title="No source imported yet"
                     description={
-                        sourcePreference === 'git'
-                            ? 'Git import arrives in a later release. Your preference is saved; no credentials are stored.'
-                            : sources.canUpload
-                              ? 'Upload a ZIP above to create the first snapshot.'
-                              : 'Ask someone who can manage this project to upload a ZIP.'
+                        github
+                            ? 'Upload a ZIP or import a GitHub repository above to create the first snapshot.'
+                            : sourcePreference === 'git'
+                              ? 'Git import arrives in a later release. Your preference is saved; no credentials are stored.'
+                              : sources.canUpload
+                                ? 'Upload a ZIP above to create the first snapshot.'
+                                : 'Ask someone who can manage this project to upload a ZIP.'
                     }
                 />
             ) : (

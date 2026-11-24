@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Workspaces;
 
 use App\Domain\Workspaces\Capability;
 use App\Domain\Workspaces\MembershipService;
+use App\Domain\Workspaces\WorkspaceImpersonation;
 use App\Domain\Workspaces\WorkspaceRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Workspaces\MemberRoleRequest;
@@ -24,12 +25,15 @@ class WorkspaceMemberController extends Controller
 
         $role = $request->user()->membershipIn($workspace)->role; // non-null: Gate::authorize above
         $canManage = $role->can(Capability::ManageMembers);
+        $canImpersonate = $role === WorkspaceRole::Owner
+            && app(WorkspaceImpersonation::class)->context($request) === null;
 
         return Inertia::render('workspaces/members', [
             'workspace' => ['id' => $workspace->id, 'name' => $workspace->name],
             'can' => [
                 'manageMembers' => $canManage,
                 'updateWorkspace' => $role->can(Capability::UpdateWorkspace),
+                'impersonateMembers' => $canImpersonate,
             ],
             'currentRole' => $role->value,
             'assignableRoles' => collect(WorkspaceRole::cases())

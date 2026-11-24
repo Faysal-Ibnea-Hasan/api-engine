@@ -10,6 +10,7 @@ use App\Domain\Sources\SnapshotImporter;
 use App\Domain\Sources\SnapshotStatus;
 use App\Domain\Sources\SourceType;
 use App\Domain\Workspaces\WorkspaceRole;
+use App\Jobs\FetchGitHubArchiveJob;
 use App\Jobs\ImportSnapshotJob;
 use App\Models\ProcessingRun;
 use App\Models\Project;
@@ -300,6 +301,19 @@ class SnapshotImportTest extends TestCase
         $horizon = (int) config('horizon.defaults.supervisor-1.timeout');
 
         $this->assertGreaterThan($job, $horizon);
+        foreach (['database', 'redis'] as $connection) {
+            $this->assertGreaterThan($horizon, (int) config("queue.connections.{$connection}.retry_after"), $connection);
+        }
+    }
+
+    public function test_the_github_archive_fetch_job_fits_the_same_timeout_ordering()
+    {
+        $fetch = (new FetchGitHubArchiveJob('run'))->timeout;
+        $horizon = (int) config('horizon.defaults.supervisor-1.timeout');
+
+        $this->assertLessThanOrEqual(SnapshotImporter::JOB_TIMEOUT, $fetch); // its run claim must not go stale mid-download
+        $this->assertGreaterThan((int) config('github.archive_timeout_seconds'), $fetch);
+        $this->assertGreaterThan($fetch, $horizon);
         foreach (['database', 'redis'] as $connection) {
             $this->assertGreaterThan($horizon, (int) config("queue.connections.{$connection}.retry_after"), $connection);
         }

@@ -1,5 +1,6 @@
-import { Link, router } from '@inertiajs/react';
-import { LogOut, Settings } from 'lucide-react';
+import { Link, router, usePage } from '@inertiajs/react';
+import { LogOut, Settings, Undo2 } from 'lucide-react';
+import WorkspaceImpersonationController from '@/actions/App/Http/Controllers/Workspaces/WorkspaceImpersonationController';
 import {
     DropdownMenuGroup,
     DropdownMenuItem,
@@ -18,6 +19,7 @@ type Props = {
 
 export function UserMenuContent({ user }: Props) {
     const cleanup = useMobileNavigation();
+    const { impersonation } = usePage().props;
 
     const handleLogout = () => {
         cleanup();
@@ -32,32 +34,48 @@ export function UserMenuContent({ user }: Props) {
                 </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-                <DropdownMenuItem asChild>
-                    <Link
-                        className="block w-full cursor-pointer"
-                        href={edit()}
-                        prefetch
-                        onClick={cleanup}
-                    >
-                        <Settings className="mr-2" />
-                        Settings
-                    </Link>
-                </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-                <Link
-                    className="block w-full cursor-pointer"
-                    href={logout()}
-                    as="button"
-                    onClick={handleLogout}
-                    data-test="logout-button"
+            {impersonation ? (
+                <DropdownMenuItem
+                    onSelect={() => {
+                        cleanup();
+                        router.delete(
+                            WorkspaceImpersonationController.destroy.url(),
+                        );
+                    }}
                 >
-                    <LogOut className="mr-2" />
-                    Log out
-                </Link>
-            </DropdownMenuItem>
+                    <Undo2 className="mr-2" />
+                    Return to {impersonation.owner.name}
+                </DropdownMenuItem>
+            ) : (
+                <>
+                    <DropdownMenuGroup>
+                        <DropdownMenuItem asChild>
+                            <Link
+                                className="block w-full cursor-pointer"
+                                href={edit()}
+                                prefetch
+                                onClick={cleanup}
+                            >
+                                <Settings className="mr-2" />
+                                Settings
+                            </Link>
+                        </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                        <Link
+                            className="block w-full cursor-pointer"
+                            href={logout()}
+                            as="button"
+                            onClick={handleLogout}
+                            data-test="logout-button"
+                        >
+                            <LogOut className="mr-2" />
+                            Log out
+                        </Link>
+                    </DropdownMenuItem>
+                </>
+            )}
         </>
     );
 }

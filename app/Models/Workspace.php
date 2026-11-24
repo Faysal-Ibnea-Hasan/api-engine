@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
@@ -27,6 +28,13 @@ class Workspace extends Model
     public function members(): HasMany
     {
         return $this->hasMany(WorkspaceMember::class);
+    }
+
+    /** @return BelongsToMany<GitHubInstallation, $this> GitHub App installations this workspace was explicitly authorized for */
+    public function githubInstallations(): BelongsToMany
+    {
+        return $this->belongsToMany(GitHubInstallation::class, 'workspace_github_installations', 'workspace_id', 'github_installation_id')
+            ->withPivot('connected_by')->withTimestamps();
     }
 
     /** @return HasMany<WorkspaceInvitation, $this> */

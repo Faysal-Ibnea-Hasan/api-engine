@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\GitHubAppSettings;
+use App\Support\Features;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -27,9 +29,15 @@ class ReadinessController extends Controller
         ];
 
         $ready = ! in_array('fail', $checks, true);
+        $body = ['status' => $ready ? 'ready' : 'unavailable', 'checks' => $checks];
+
+        // Whether the GitHub App is set up, nothing more: never its IDs, secret or key. Missing settings only disable GitHub import.
+        if (Features::enabled('git_import')) {
+            $body['github_configured'] = rescue(fn () => GitHubAppSettings::configured(), false, report: false);
+        }
 
         return response()->json(
-            ['status' => $ready ? 'ready' : 'unavailable', 'checks' => $checks],
+            $body,
             $ready ? 200 : 503,
         );
     }

@@ -236,6 +236,45 @@ Everyone else joins through an email invitation from a workspace Owner or Mainta
 - `ProjectDeleter` removes drafts before analyses.
 - Features sit behind `FEATURE_STATIC_DOCS=true`, which also needs `FEATURE_ENDPOINT_ANALYSIS`.
 
+## Conventions (P09: GitHub import)
+
+- **One GitHub App for the whole platform.** Its App ID, slug, Client ID, client secret and private key are platform settings, stored in `github_app_settings` (secret and key with Laravel's `encrypted` cast) and edited by platform admins at **Settings → GitHub App** (`/settings/github-app`; everyone else gets 404). Nothing GitHub-related goes in `.env` except `FEATURE_GIT_IMPORT`. The secret and key are write-only: the page only shows "Saved / Not set", and a blank field keeps the stored value.
+- **Read-only.** The app asks for Contents: read and Metadata: read only. Installation tokens are minted on demand, limited to one repository where possible, and kept in memory for the current request or job only: never in the database, cache, queue payloads, logs, audit rows or Inertia props. (_Deviation from the guide:_ it suggests caching tokens encrypted; the cache store is the database in production, so they are memoized in memory instead. The App JWT is signed with `openssl_sign` rather than a JWT library, because none is installed.)
+- **Connecting** (Owners and Maintainers, `Capability::ManageIntegrations`): `POST /workspaces/{workspace}/integrations/github/connect` stores the SHA-256 of a one-time state (10 minutes, bound to user and workspace) and sends the browser to `github.com/apps/<slug>/installations/new`. The callback (`GET /integrations/github/callback`) consumes the state once, exchanges the OAuth code, and links the installation only if the GitHub user can see it (`GET /user/installations`, matching our App ID). The `installation_id` from the browser is never trusted alone. The user token is then discarded. Disconnect (`DELETE …/integrations/github/{installation}`) removes only the workspace link.
+- **Tenancy:** installations have no `workspace_id`; every lookup goes through `GitHubInstallation::linkedTo($workspace, $id)` and anything unlinked is 404.
+- **Importing** (`POST /projects/{project}/github/imports`, `Capability::ImportAndAnalyze`, named `github-import` limiter): the repository is re-checked by numeric ID, then the branch, tag, default branch or full SHA is resolved to one commit SHA **before** anything is downloaded. `FetchGitHubArchiveJob` (payload: run ID only, `imports` queue, 600 s timeout, below Horizon's 1830 s and `retry_after` 1900 s) verifies the link again, streams `zipball/<sha>` to `runs/<run>/archive.zip`, and hands over to the ordinary `ImportSnapshotJob`.
+    - Redirects are followed by hand: at most 2, HTTPS only, to the API host or `codeload.github.com`, and the token never goes to the archive host. The byte limit is the ZIP upload limit, checked against `Content-Length` and the bytes actually received. A partial file is deleted after any failure.
+    - GitHub's generated wrapper folder (`owner-repo-<sha7>/`) is removed while unpacking (`ZipExtractor` `unwrap`, Git sources only), so a GitHub import and a ZIP of the repository root produce the same manifest (`ZipGitParityTest`). ZIP uploads are unchanged.
+- **Idempotent:** `github_imports` has one row per (project, source, repository, commit). Importing a commit that is importing or imported returns that run; a failed one is retried in place with the same SHA; a branch that moved resolves to a new SHA and so a new snapshot. A new SHA with identical content still dedupes to the existing snapshot, and its row records the origin.
+- **Outcome:** `SnapshotImporter` fires `ImportFinished(runId)`; `RecordGitHubImportOutcome` copies the run's status, failure code and snapshot onto `github_imports`. HTTP calls retry 429/5xx twice; what remains is stored as a stable `github.*` code (`GitHubError`), and only the code and GitHub's request id reach the log.
+- **Revocation** (disconnected here, or removed or suspended on GitHub) blocks new imports with `github.permission_revoked` / `github.installation_suspended`. Snapshots and documentation stay.
+- `ProjectDeleter` removes `github_imports` and `github_repository_sources` with the project. A download in progress claims its run, so deletion answers `project.busy` meanwhile.
+- `/ready` adds `github_configured: true|false` while the flag is on, nothing else.
+- Out of scope (guide §23): webhooks, polling, pull-request checks, write permissions, GitLab/Bitbucket/self-hosted Git, SSH or arbitrary URLs, Git history, running repository code.
+- Features sit behind `FEATURE_GIT_IMPORT=true`, which also needs `FEATURE_SOURCE_SNAPSHOTS` (and its prerequisites). With it off, every GitHub route is 404 and the project page shows ZIP only.
+
+## GitHub import: setup tutorial
+
+The same steps are in the app: **Settings → GitHub App** (platform admins) shows them with the real URLs and copy buttons, and each project's **GitHub repository** tab has a short "How importing from GitHub works" guide.
+
+1. Turn on the feature: `FEATURE_GIT_IMPORT=true` (with the earlier flags on), then sign in as a platform admin and open **Settings → GitHub App** (`/settings/github-app`).
+2. On GitHub, open [Settings → Developer settings → GitHub Apps → New GitHub App](https://github.com/settings/apps/new). For an organization, use the organization's Settings → Developer settings → GitHub Apps → New GitHub App.
+3. Fill in the form:
+    - **GitHub App name**: any name, e.g. "API Engine".
+    - **Homepage URL**: this app's URL, e.g. `https://api-engine.example.com`.
+    - **Callback URL**: `https://<your-host>/integrations/github/callback` (copy it from the settings page).
+    - **Request user authorization (OAuth) during installation**: on. GitHub then hides the Setup URL and returns people to the Callback URL. If a Setup URL is still shown, enter the same callback URL. Leave **Redirect on update** off.
+    - **Webhook**: untick **Active**.
+    - **Repository permissions**: Contents = Read-only, Metadata = Read-only, everything else No access.
+    - **Where can this GitHub App be installed?**: **Any account** if several organizations or users will connect; **Only on this account** is fine for a single organization.
+4. Click **Create GitHub App**. On the app's page, copy the **App ID** and **Client ID**, click **Generate a new client secret** (copy it now: GitHub shows it once), and click **Generate a private key** (a `.pem` file downloads). The **slug** is the last part of the app's public link, `github.com/apps/<slug>`.
+5. Enter them on **Settings → GitHub App** (paste the `.pem` contents or upload the file), click **Save**, then **Test connection**. Success shows the app's name and slug; an error usually means a wrong App ID or key.
+6. A workspace Owner or Maintainer opens **GitHub** in the sidebar (`/workspaces/<id>/integrations/github`), clicks **Connect GitHub**, and on GitHub picks the account or organization and the repositories to grant.
+7. In a project, open the **GitHub repository** tab under Source, choose the account and repository, then the default branch, a branch, a tag or a full commit SHA, and click **Import**. Detection, routes, analysis and documentation follow as for a ZIP.
+8. Repository not listed? Grant it on GitHub (the installation's **Configure** page, linked from the GitHub page), then reload. Revoked or rate-limited? Reconnect, or wait a few minutes; ZIP upload keeps working.
+
+Security: access is read-only, the client secret and private key are encrypted at rest and never shown again, and rotating them means generating a new secret or key on GitHub, saving it here, then deleting the old one on GitHub.
+
 ## Deleting projects
 
 - `DELETE /projects/{project}` with `confirm_name` set to the exact project name. Works for active, draft and archived projects.

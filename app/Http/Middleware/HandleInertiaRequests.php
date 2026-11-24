@@ -2,7 +2,9 @@
 
 namespace App\Http\Middleware;
 
+use App\Domain\Workspaces\WorkspaceImpersonation;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Models\WorkspaceMember;
 use App\Support\Features;
 use Illuminate\Http\Request;
@@ -43,11 +45,14 @@ class HandleInertiaRequests extends Middleware
             'name' => config('app.name'),
             'auth' => [
                 'user' => $request->user(),
+                // Only to show ops-only links (e.g. Settings → GitHub App); the routes check it themselves.
+                'isPlatformAdmin' => $request->user()?->is_platform_admin === true,
             ],
             // Flag names only (true/false), for hiding nav items. Routes enforce the flags themselves.
             'features' => array_map(fn (mixed $on): bool => $on === true, config()->array('features')),
             'workspaces' => fn () => $this->workspaces($request),
             'currentWorkspace' => fn () => $this->currentWorkspace($request),
+            'impersonation' => fn () => $this->impersonation($request),
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];
     }
@@ -65,7 +70,14 @@ class HandleInertiaRequests extends Middleware
             return null;
         }
 
-        return $user->memberships()->with('workspace:id,name')->get()
+        $memberships = $user->memberships()->with('workspace:id,name');
+        $context = app(WorkspaceImpersonation::class)->context($request);
+
+        if ($context !== null) {
+            $memberships->forWorkspace($context['workspace_id']);
+        }
+
+        return $memberships->get()
             ->map(fn (WorkspaceMember $m) => [
                 'id' => $m->workspace->id,
                 'name' => $m->workspace->name,
@@ -98,6 +110,34 @@ class HandleInertiaRequests extends Middleware
             'role' => $membership->role->value,
             'roleLabel' => $membership->role->label(),
             'can' => $membership->role->capabilities(),
+        ];
+    }
+
+    /**
+     * @return array{active: true, startedAt: string, owner: array{id: int, name: string}, member: array{id: int, name: string, email: string}, workspace: array{id: string, name: string}}|null
+     */
+    private function impersonation(Request $request): ?array
+    {
+        $context = app(WorkspaceImpersonation::class)->context($request);
+        $member = $request->user();
+
+        if ($context === null || ! $member instanceof User) {
+            return null;
+        }
+
+        $owner = User::query()->find($context['impersonator_id']);
+        $workspace = Workspace::query()->find($context['workspace_id']);
+
+        if ($owner === null || $workspace === null) {
+            return null;
+        }
+
+        return [
+            'active' => true,
+            'startedAt' => $context['started_at'],
+            'owner' => ['id' => $owner->id, 'name' => $owner->name],
+            'member' => ['id' => $member->id, 'name' => $member->name, 'email' => $member->email],
+            'workspace' => ['id' => $workspace->id, 'name' => $workspace->name],
         ];
     }
 }

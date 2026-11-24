@@ -2,6 +2,7 @@
 
 use App\Domain\Shared\DomainError;
 use App\Http\Middleware\AssignCorrelationId;
+use App\Http\Middleware\EnforceWorkspaceImpersonation;
 use App\Http\Middleware\EnsureFeatureEnabled;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
@@ -29,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
         $middleware->web(append: [
+            EnforceWorkspaceImpersonation::class,
             HandleAppearance::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
@@ -47,6 +49,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->render(fn (PostTooLargeException $e) => response(__('The upload is too large.'), 413));
 
         $exceptions->dontReport(DomainError::class);
+
+        // GitHub App secrets (Settings → GitHub App) never go into the session's old input.
+        $exceptions->dontFlash(['client_secret', 'private_key']);
 
         $exceptions->render(function (DomainError $e, Request $request) {
             if ($request->is('api/*') || $request->expectsJson()) {

@@ -12,6 +12,7 @@ use App\Domain\Workspaces\Capability;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Discovery\EndpointPresenter;
 use App\Http\Controllers\Framework\DetectionPresenter;
+use App\Http\Controllers\GitHub\GitHubPresenter;
 use App\Http\Controllers\Sources\SourcePresenter;
 use App\Http\Requests\Projects\DeleteProjectRequest;
 use App\Http\Requests\Projects\StoreProjectRequest;
@@ -101,6 +102,10 @@ class ProjectController extends Controller
                     canImportFixture: app()->environment(['local', 'testing']) && $request->user()->can('update', $project),
                     canUpload: Features::enabled('zip_import') && $request->user()->can('update', $project) && ! $project->isArchived(),
                 )
+                : null,
+            // P09: the GitHub source tab. Null while the flag is off, so the page shows ZIP only.
+            'github' => fn () => Features::enabled('source_snapshots') && Features::enabled('git_import')
+                ? GitHubPresenter::panel($project, $request->user())
                 : null,
         ]);
     }

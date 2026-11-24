@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Sources;
 
+use App\Domain\GitHub\GitHubError;
 use App\Domain\Sources\SnapshotStatus;
 use App\Domain\Sources\SourceRejection;
 use App\Models\ProcessingRun;
@@ -25,7 +26,7 @@ final class SourcePresenter
             'attempts' => $run->attempts,
             'deduplicated' => $run->deduplicated,
             'failureCode' => $run->failure_code,
-            'failureMessage' => $run->failure_code === null ? null : SourceRejection::messageFor($run->failure_code),
+            'failureMessage' => $run->failure_code === null ? null : self::failureMessage($run->failure_code),
             'snapshotId' => $run->status->isActive() ? null : $run->source_snapshot_id,
             'cancelRequested' => $run->cancel_requested_at !== null,
             'createdAt' => $run->created_at?->toIso8601String(),
@@ -47,8 +48,14 @@ final class SourcePresenter
             'totalBytes' => $snapshot->total_bytes,
             'readyAt' => $snapshot->ready_at?->toIso8601String(),
             'createdAt' => $snapshot->created_at?->toIso8601String(),
-            'failureMessage' => $snapshot->failure_code === null ? null : SourceRejection::messageFor($snapshot->failure_code),
+            'failureMessage' => $snapshot->failure_code === null ? null : self::failureMessage($snapshot->failure_code),
         ];
+    }
+
+    /** Fixed, user-safe text for a stored failure code (source rejections, or GitHub's stable codes). */
+    public static function failureMessage(string $code): string
+    {
+        return str_starts_with($code, 'github.') ? GitHubError::messageFor($code) : SourceRejection::messageFor($code);
     }
 
     /** @return array<string, mixed> the project page's Source panel */

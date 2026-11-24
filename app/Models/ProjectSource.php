@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 /**
@@ -35,6 +36,12 @@ class ProjectSource extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class);
+    }
+
+    /** @return HasOne<GitHubRepositorySource, $this> */
+    public function githubRepositorySource(): HasOne
+    {
+        return $this->hasOne(GitHubRepositorySource::class);
     }
 
     /** @return HasMany<SourceSnapshot, $this> */
