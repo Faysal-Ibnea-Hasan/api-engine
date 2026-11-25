@@ -308,7 +308,7 @@ export default function ShowProject({
                 )}
 
                 {(editable || can.update || can.delete) && (
-                    <div className="grid items-start gap-3 lg:grid-cols-2">
+                    <div className="grid items-stretch gap-3 lg:grid-cols-2">
                         {editable && (
                             <section className="overflow-hidden rounded-lg border bg-card">
                                 <div className="flex min-h-12 items-center border-b px-3 py-2">
@@ -416,7 +416,7 @@ export default function ShowProject({
                             </section>
                         )}
 
-                        <div className="flex flex-col gap-3">
+                        <div className="flex h-full flex-col gap-3">
                             {can.update && (
                                 <section className="rounded-lg border bg-card p-3">
                                     <Heading

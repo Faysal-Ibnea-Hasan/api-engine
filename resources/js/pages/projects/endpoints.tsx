@@ -21,7 +21,6 @@ import Progress from '@/components/progress';
 import ResolutionBadge from '@/components/resolution-badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 import { cn } from '@/lib/utils';
 import type {
@@ -82,25 +81,11 @@ type Props = {
     canScan: boolean;
     analysisEnabled: boolean;
     endpoints: Paginated<EndpointRow> | null;
-    groups: string[];
     filters: {
-        q: string;
         method: string;
-        group: string;
-        auth: string;
-        resolution: string;
     };
     findings: ScanFindingRow[];
 };
-
-const groupLabel = (group: string) =>
-    group === 'api'
-        ? 'API'
-        : group === 'web'
-          ? 'Web'
-          : group.startsWith('module:')
-            ? `Module ${group.slice(7)}`
-            : group;
 
 export default function Endpoints({
     project,
@@ -110,14 +95,13 @@ export default function Endpoints({
     canScan,
     analysisEnabled,
     endpoints,
-    groups,
     filters,
     findings,
 }: Props) {
     const active = scan?.active ?? false;
     const { start, stop } = usePoll(
         2000,
-        { only: ['scan', 'endpoints', 'groups', 'findings'] },
+        { only: ['scan', 'endpoints', 'findings'] },
         { autoStart: false },
     );
 
@@ -335,40 +319,16 @@ export default function Endpoints({
                                     preserveState: true,
                                     preserveScroll: true,
                                 }}
-                                className="flex flex-wrap items-center gap-2 text-sm"
+                                className="flex items-center text-sm"
                             >
-                                <Input
-                                    name="q"
-                                    type="search"
-                                    defaultValue={filters.q}
-                                    placeholder="Search URI, name or controller"
-                                    aria-label="Search endpoints"
-                                    className="w-64"
-                                />
-                                <NativeSelect
-                                    name="group"
-                                    defaultValue={filters.group}
-                                    aria-label="Route group"
-                                    className="w-auto"
-                                >
-                                    <option value="all">All groups</option>
-                                    {groups.map((g) => (
-                                        <option key={g} value={g}>
-                                            {groupLabel(g)}
-                                        </option>
-                                    ))}
-                                    {!groups.includes(filters.group) &&
-                                        filters.group !== 'all' && (
-                                            <option value={filters.group}>
-                                                {groupLabel(filters.group)}
-                                            </option>
-                                        )}
-                                </NativeSelect>
                                 <NativeSelect
                                     name="method"
                                     defaultValue={filters.method}
                                     aria-label="HTTP method"
                                     className="w-auto"
+                                    onChange={(event) =>
+                                        event.currentTarget.form?.requestSubmit()
+                                    }
                                 >
                                     <option value="">Any method</option>
                                     {[
@@ -384,72 +344,13 @@ export default function Endpoints({
                                         </option>
                                     ))}
                                 </NativeSelect>
-                                <NativeSelect
-                                    name="auth"
-                                    defaultValue={filters.auth}
-                                    aria-label="Authentication"
-                                    className="w-auto"
-                                >
-                                    <option value="">Any auth</option>
-                                    {analysisEnabled ? (
-                                        <>
-                                            <option value="required">
-                                                Auth required
-                                            </option>
-                                            <option value="required_unverified">
-                                                Token not always verified
-                                            </option>
-                                            <option value="guest_or_user">
-                                                Guest or user
-                                            </option>
-                                            <option value="not_required">
-                                                No auth
-                                            </option>
-                                            <option value="unknown">
-                                                Can't tell
-                                            </option>
-                                            <option value="not_analyzed">
-                                                Not analyzed
-                                            </option>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <option value="required">
-                                                Auth required
-                                            </option>
-                                            <option value="unknown">
-                                                Auth not detected
-                                            </option>
-                                        </>
-                                    )}
-                                </NativeSelect>
-                                <NativeSelect
-                                    name="resolution"
-                                    defaultValue={filters.resolution}
-                                    aria-label="Resolution"
-                                    className="w-auto"
-                                >
-                                    <option value="">Any status</option>
-                                    <option value="resolved">Resolved</option>
-                                    <option value="partial">Partial</option>
-                                    <option value="unresolved">
-                                        Unresolved
-                                    </option>
-                                </NativeSelect>
-                                <Button
-                                    type="submit"
-                                    variant="outline"
-                                    size="sm"
-                                >
-                                    Filter
-                                </Button>
                             </Form>
 
                             {endpoints.data.length === 0 ? (
                                 <EmptyState
                                     icon={RouteIcon}
                                     title="No endpoints match"
-                                    description="Try another search, method or group."
+                                    description="Try another method."
                                 />
                             ) : (
                                 <ul className="divide-y rounded-lg border bg-card">

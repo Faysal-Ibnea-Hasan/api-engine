@@ -1090,6 +1090,24 @@ const buttonTag = (html: string, text: string) =>
         (m) => m[2].replace(/<[^>]*>/g, '').trim() === text,
     )?.[1];
 
+describe('Endpoint list filters', () => {
+    it('keeps only the HTTP method filter', () => {
+        const html = renderEndpoints();
+        const selects = [...html.matchAll(/<select\b[^>]*>/g)].map(
+            (match) => match[0],
+        );
+
+        expect(selects).toHaveLength(1);
+        expect(selects[0]).toContain('name="method"');
+        expect(selects[0]).toContain('aria-label="HTTP method"');
+        expect(html).not.toContain('name="q"');
+        expect(html).not.toContain('name="group"');
+        expect(html).not.toContain('name="auth"');
+        expect(html).not.toContain('name="resolution"');
+        expect(buttonTexts(html)).not.toContain('Filter');
+    });
+});
+
 describe('Adversary chunk 3: long slugs, paths and URIs stay in their container', () => {
     it('projects list: an 80-char slug in the flex row can shrink (minor)', () => {
         const html = renderToStaticMarkup(
