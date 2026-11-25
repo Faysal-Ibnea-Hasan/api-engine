@@ -1201,13 +1201,103 @@ describe('AC44: Blue and neutral kit parts', () => {
         const content = tokenize(text.slice(0, at));
         const arrow = tokenize(text.slice(at));
 
+        // Revision 12c: light mode keeps the inverted fill; dark mode is dark grey (--border).
         expect(content).toEqual(
-            expect.arrayContaining(['bg-foreground', 'text-background']),
+            expect.arrayContaining([
+                'bg-foreground',
+                'text-background',
+                'dark:bg-border',
+                'dark:text-foreground',
+            ]),
         );
         expect(arrow).toEqual(
-            expect.arrayContaining(['bg-foreground', 'fill-foreground']),
+            expect.arrayContaining([
+                'bg-foreground',
+                'fill-foreground',
+                'dark:bg-border',
+                'dark:fill-border',
+            ]),
         );
+
+        for (const tokens of [content, arrow]) {
+            expect(tokens).not.toContain('dark:bg-foreground');
+            expect(tokens).not.toContain('dark:text-background');
+        }
+
         noPrimary(tokenize(text));
+    });
+
+    // Revision 12c (C3b-F14) and 12d: no Badge in framework-detection-card.tsx is the default variant.
+    describe('framework-detection-card.tsx badges', () => {
+        const collapse = (s: string) => s.replace(/\s+/g, ' ').trim();
+        const text = fs.readFileSync(
+            path.join(JS_ROOT, 'components/framework-detection-card.tsx'),
+            'utf8',
+        );
+
+        /** Each `<Badge` element: opening tag (to the first `>` at brace depth 0) and its child text, whitespace-collapsed. */
+        const badges = [...text.matchAll(/<Badge(?![\w.-])/g)].map((m) => {
+            let depth = 0;
+            let quote = '';
+            let i = m.index;
+
+            for (; i < text.length; i++) {
+                const c = text[i];
+
+                if (quote) {
+                    if (c === quote) quote = '';
+
+                    continue;
+                }
+
+                if (depth === 0 && (c === '"' || c === "'")) quote = c;
+                else if (c === '{') depth++;
+                else if (c === '}') depth--;
+                else if (c === '>' && depth === 0) break;
+            }
+
+            const close = text.indexOf('</Badge>', i);
+
+            return {
+                open: collapse(text.slice(m.index, i + 1)),
+                child: collapse(text.slice(i + 1, close)),
+            };
+        });
+
+        it('"Selected root" is the info tint', () => {
+            const found = badges.filter((b) => b.child === 'Selected root');
+
+            expect(found).toHaveLength(1);
+            expect(found[0].open).toContain('variant="info"');
+        });
+
+        it('the status badge is info when detected, secondary when partial, destructive otherwise', () => {
+            const found = badges.filter(
+                (b) =>
+                    b.child ===
+                    '{Object.hasOwn(statusText, detection.status) && statusText[detection.status]}',
+            );
+
+            expect(found).toHaveLength(1);
+            expect(found[0].open).toContain(
+                "detection.status === 'detected' ? 'info'",
+            );
+            expect(found[0].open).toContain(
+                "detection.status === 'partial' ? 'secondary'",
+            );
+            expect(found[0].open).toContain(": 'destructive'");
+        });
+
+        it('no Badge uses the default variant', () => {
+            expect(badges.length).toBeGreaterThanOrEqual(2);
+            expect(text).not.toContain("'default'");
+            expect(text).not.toContain('variant="default"');
+            expect(badges.filter((b) => b.open === '<Badge>')).toEqual([]);
+
+            for (const b of badges) {
+                expect(b.open).toMatch(/\bvariant=/);
+            }
+        });
     });
 
     it('the default Badge is solid blue', () => {

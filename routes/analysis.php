@@ -16,6 +16,6 @@ Route::middleware(['auth', 'verified', 'feature:workspace_management', 'feature:
 Route::middleware(['auth', 'verified', 'feature:workspace_management', 'feature:project_wizard', 'feature:source_snapshots', 'feature:framework_detection', 'feature:route_discovery', 'feature:endpoint_analysis', 'feature:advanced_analysis'])
     ->scopeBindings()
     ->group(function () {
-        Route::post('projects/{project}/analyses/{analysis}/dependencies', [WorkflowController::class, 'store'])->middleware('throttle:endpoint-analysis')->name('projects.analyses.dependencies.store');
+        Route::post('projects/{project}/analyses/{analysis}/dependencies', [WorkflowController::class, 'store'])->middleware('throttle:workflow-explain')->name('projects.analyses.dependencies.store');
         Route::get('projects/{project}/analyses/{analysis}/dependencies', [WorkflowController::class, 'show'])->name('projects.analyses.dependencies');
     });

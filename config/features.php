@@ -37,4 +37,7 @@ return [
 
     // P10: workflow graph of an endpoint (services, models, jobs, events, resources). Needs endpoint_analysis.
     'advanced_analysis' => (bool) env('FEATURE_ADVANCED_ANALYSIS', false),
+
+    // AI providers (platform settings) and the AI workflow explanation. Needs advanced_analysis.
+    'ai_settings' => (bool) env('FEATURE_AI_SETTINGS', false),
 ];

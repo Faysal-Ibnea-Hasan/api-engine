@@ -4,6 +4,7 @@ import {
     Palette,
     Settings,
     ShieldCheck,
+    Sparkles,
     UserRound,
 } from 'lucide-react';
 import type { PropsWithChildren } from 'react';
@@ -12,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { useCurrentUrl } from '@/hooks/use-current-url';
 import { cn, toUrl } from '@/lib/utils';
+import { edit as editAiSettings } from '@/routes/ai-settings';
 import { edit as editAppearance } from '@/routes/appearance';
 import { edit as editGitHubApp } from '@/routes/github-app';
 import { edit } from '@/routes/profile';
@@ -40,17 +42,15 @@ export default function SettingsLayout({ children }: PropsWithChildren) {
     const { isCurrentOrParentUrl } = useCurrentUrl();
     const { auth, features } = usePage().props;
     // Platform admins only; the route itself answers 404 to everyone else.
-    const navItems: NavItem[] =
-        auth.isPlatformAdmin && features.git_import
-            ? [
-                  ...sidebarNavItems,
-                  {
-                      title: 'GitHub App',
-                      href: editGitHubApp(),
-                      icon: GitBranch,
-                  },
-              ]
-            : sidebarNavItems;
+    const navItems: NavItem[] = [
+        ...sidebarNavItems,
+        ...(auth.isPlatformAdmin && features.git_import
+            ? [{ title: 'GitHub App', href: editGitHubApp(), icon: GitBranch }]
+            : []),
+        ...(auth.isPlatformAdmin && features.ai_settings
+            ? [{ title: 'AI', href: editAiSettings(), icon: Sparkles }]
+            : []),
+    ];
 
     return (
         <div className="flex flex-col gap-4 p-4 md:p-6">

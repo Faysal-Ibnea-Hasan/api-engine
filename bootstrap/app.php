@@ -50,8 +50,8 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $exceptions->dontReport(DomainError::class);
 
-        // GitHub App secrets (Settings → GitHub App) never go into the session's old input.
-        $exceptions->dontFlash(['client_secret', 'private_key']);
+        // GitHub App secrets and AI keys (Settings → GitHub App / AI) never go into the session's old input.
+        $exceptions->dontFlash(['client_secret', 'private_key', 'api_key']);
 
         $exceptions->render(function (DomainError $e, Request $request) {
             if ($request->is('api/*') || $request->expectsJson()) {

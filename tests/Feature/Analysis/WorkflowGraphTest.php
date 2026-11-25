@@ -9,6 +9,7 @@ use App\Domain\Docs\StaticDocumentationBuilder;
 use App\Domain\Projects\ProjectDeleter;
 use App\Domain\Sources\RunStatus;
 use App\Domain\Workspaces\WorkspaceRole;
+use App\Models\AiProvider;
 use App\Models\ApiDependency;
 use App\Models\ApiEndpoint;
 use App\Models\DocumentationVersion;
@@ -17,9 +18,11 @@ use App\Models\Project;
 use App\Models\RouteScan;
 use App\Models\SourceSnapshot;
 use App\Models\User;
+use App\Models\WorkflowExplanation;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Mockery;
@@ -48,7 +51,7 @@ class WorkflowGraphTest extends TestCase
     {
         parent::setUp();
         $this->enableWorkspaces();
-        config(['features.project_wizard' => true, 'features.source_snapshots' => true, 'features.framework_detection' => true, 'features.route_discovery' => true, 'features.endpoint_analysis' => true, 'features.advanced_analysis' => true, 'app.debug' => false]);
+        config(['features.project_wizard' => true, 'features.source_snapshots' => true, 'features.framework_detection' => true, 'features.route_discovery' => true, 'features.endpoint_analysis' => true, 'features.advanced_analysis' => true, 'features.ai_settings' => true, 'app.debug' => false]);
         $this->withoutVite();
         Storage::fake('quarantine', ['throw' => true]);
         Storage::fake('snapshots', ['throw' => true]);
@@ -72,6 +75,10 @@ class WorkflowGraphTest extends TestCase
         $this->project = Project::factory()->create();
         $this->developer = $this->memberOf(WorkspaceRole::Developer, $this->project->workspace);
         $this->snapshot = $this->snapshotFrom($files, $this->project, $this->developer);
+
+        // Tracing runs only with AI (spec § 6.5a): a ready default provider, answered by a fake.
+        AiProvider::factory()->create(['provider' => 'anthropic', 'is_default' => true, 'enabled' => true, 'model' => 'claude-test', 'available_models' => [['id' => 'claude-test', 'effort' => true]]]);
+        Http::fake(['api.anthropic.com/*' => Http::response(['content' => [['type' => 'text', 'text' => "## Overview\nPlaces an order."]], 'stop_reason' => 'end_turn', 'usage' => ['input_tokens' => 10, 'output_tokens' => 5]])]);
     }
 
     private function endpoint(string $action): ApiEndpoint
@@ -322,15 +329,16 @@ class WorkflowGraphTest extends TestCase
     public function test_tracing_creates_a_separate_advanced_analysis_with_normalized_dependencies(): void
     {
         $basic = $this->basicAnalysis();
-        $this->getJson($this->traceUrl($basic))->assertOk()->assertJson(['advanced' => null, 'graph' => null, 'canTrace' => true]);
+        $this->getJson($this->traceUrl($basic))->assertOk()->assertJson(['advanced' => null, 'graph' => null, 'canExplain' => true]);
 
-        $this->post($this->traceUrl($basic))->assertRedirect();
-        $this->post($this->traceUrl($basic))->assertRedirect(); // a repeated click reuses it
+        $this->post($this->traceUrl($basic))->assertRedirect()->assertSessionHas('inertia.flash_data.toast', ['type' => 'info', 'message' => 'Explaining the workflow…']);
+        $this->post($this->traceUrl($basic))->assertRedirect(); // a repeated click reuses the trace
 
         $advanced = EndpointAnalysis::query()->where('profile', EndpointAnalyses::ADVANCED)->sole();
         $this->assertNotSame($basic->analysis_key, $advanced->analysis_key);
         $this->assertSame(EndpointAnalyses::key($this->endpoint('store'), EndpointAnalyses::ADVANCED), $advanced->analysis_key);
         $this->assertSame(1, $advanced->attempts);
+        $this->assertSame('completed', WorkflowExplanation::query()->where('endpoint_analysis_id', $advanced->id)->sole()->status, 'trace then AI');
         $this->assertFalse(EndpointAnalyses::isStale($advanced));
         $this->assertFalse(EndpointAnalyses::isStale($basic->fresh()));
         $this->assertSame(count($advanced->result['graph']['edges']), ApiDependency::query()->where('endpoint_analysis_id', $advanced->id)->count());
@@ -350,7 +358,7 @@ class WorkflowGraphTest extends TestCase
         $this->assertSame('app/Http/Controllers/OrderController.php', $call['refs'][0]['path']);
         $this->assertSame($json, $this->getJson($this->traceUrl($advanced))->json(), 'the advanced id answers the same');
 
-        $this->post($this->traceUrl($basic), ['reanalyze' => true])->assertRedirect();
+        $this->post($this->traceUrl($basic), ['again' => true])->assertRedirect();
         $this->assertSame(2, $advanced->fresh()->attempts);
         $this->assertSame(count($advanced->result['graph']['edges']), ApiDependency::query()->where('endpoint_analysis_id', $advanced->id)->count(), 'rewritten, not duplicated');
     }
@@ -372,7 +380,7 @@ class WorkflowGraphTest extends TestCase
                 }
                 $this->assertDoesNotMatchRegularExpression('/line \d/', $raw);
             }
-            $this->assertFalse($this->actingAs($member)->getJson($this->traceUrl($basic))->json('canTrace'));
+            $this->assertFalse($this->actingAs($member)->getJson($this->traceUrl($basic))->json('canExplain'));
             $this->actingAs($member)->post($this->traceUrl($basic))->assertForbidden();
         }
     }

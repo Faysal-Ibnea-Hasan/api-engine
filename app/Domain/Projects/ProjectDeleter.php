@@ -22,6 +22,7 @@ use App\Models\SourceFile;
 use App\Models\SourceSnapshot;
 use App\Models\UploadSession;
 use App\Models\User;
+use App\Models\WorkflowExplanation;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
@@ -73,6 +74,7 @@ final class ProjectDeleter
 
             DocumentationVersion::query()->where('project_id', $project->id)->delete();  // before analyses: they restrict deletes
             ApiDependency::query()->where('project_id', $project->id)->delete();
+            WorkflowExplanation::query()->where('project_id', $project->id)->delete();
             EndpointAnalysis::query()->where('project_id', $project->id)->delete();      // evidence and findings cascade
             $scans = RouteScan::query()->where('project_id', $project->id)->pluck('id');
             ApiEndpoint::query()->whereIn('route_scan_id', $scans)->delete();           // findings cascade with scans

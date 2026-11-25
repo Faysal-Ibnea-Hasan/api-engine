@@ -5,9 +5,9 @@ import WorkflowController from '@/actions/App/Http/Controllers/Analysis/Workflow
 import Heading from '@/components/heading';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
+import { WorkflowExplanationView } from '@/components/workflow-explanation';
 import { cn } from '@/lib/utils';
 import type {
     AnalysisResult,
@@ -420,7 +420,113 @@ export function WorkflowView({
     );
 }
 
-/** The Workflow tab: loads, starts and polls the advanced analysis of this endpoint. */
+/**
+ * The explanation as the tab treats it: a 'tracing' row counts as running only while its trace does. One whose
+ * finish event was missed stops the spinner and polling and shows the button, whose request hands the trace over.
+ */
+export function liveExplanation(
+    data: WorkflowData,
+): WorkflowData['explanation'] {
+    const explanation = data.explanation;
+
+    return explanation?.stage === 'tracing' && !data.advanced?.active
+        ? { ...explanation, stage: null }
+        : explanation;
+}
+
+/** How often the tab re-reads while a run is in progress (ms), or null once it is final. The trace takes seconds, the AI step minutes. */
+export function pollDelay(data: WorkflowData): number | null {
+    const stage = liveExplanation(data)?.stage ?? null;
+
+    if (data.advanced?.active === true || stage === 'tracing') {
+        return 1500;
+    }
+
+    return stage === 'writing' ? 5000 : null;
+}
+
+/** Everything the tab shows once its data has loaded: the AI explanation first, the trace folded below it. */
+export function WorkflowContent({
+    data,
+    basic,
+    canViewSource,
+    query,
+    onQuery,
+    onExplain,
+}: {
+    data: WorkflowData;
+    basic: AnalysisResult;
+    canViewSource: boolean;
+    query: string;
+    onQuery: (q: string) => void;
+    onExplain: (again: boolean) => void;
+}) {
+    const advanced = data.advanced;
+    const final =
+        advanced?.status === 'completed' || advanced?.status === 'partial';
+
+    return (
+        <div className="space-y-4">
+            <WorkflowExplanationView
+                explanation={liveExplanation(data)}
+                ai={data.ai}
+                canExplain={data.canExplain}
+                onExplain={onExplain}
+            />
+
+            {advanced !== null && (
+                <details className="space-y-4">
+                    <summary className="cursor-pointer rounded-sm text-sm text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+                        Show trace details
+                    </summary>
+
+                    <div className="mt-4 space-y-4">
+                        {advanced.active && (
+                            <p className="flex items-center gap-2 text-muted-foreground">
+                                <Spinner /> Tracing the code…
+                            </p>
+                        )}
+
+                        {advanced.status === 'failed' && (
+                            <Alert variant="destructive">
+                                <AlertDescription>
+                                    <p>
+                                        {advanced.failureCode ===
+                                        'analyzer_mismatch'
+                                            ? 'The queue worker is running an older analyzer that cannot trace workflows, so its result was not saved. Restart the queue worker, then explain again.'
+                                            : `Tracing failed (${advanced.failureCode ?? 'error'}). No partial result was saved.`}
+                                    </p>
+                                </AlertDescription>
+                            </Alert>
+                        )}
+
+                        {advanced.stale && !advanced.active && (
+                            <Alert variant="warning" role="note">
+                                <TriangleAlert aria-hidden="true" />
+                                <AlertDescription>
+                                    This trace was made by an older analyzer
+                                    version. Explain again for the current one.
+                                </AlertDescription>
+                            </Alert>
+                        )}
+
+                        {data.graph && final && (
+                            <WorkflowView
+                                graph={data.graph}
+                                basic={basic}
+                                canViewSource={canViewSource}
+                                query={query}
+                                onQuery={onQuery}
+                            />
+                        )}
+                    </div>
+                </details>
+            )}
+        </div>
+    );
+}
+
+/** The Workflow tab: loads, starts and polls the advanced analysis and its AI explanation. */
 export default function WorkflowPanel({
     projectId,
     analysisId,
@@ -452,51 +558,37 @@ export default function WorkflowPanel({
 
     useEffect(load, [load]);
 
-    const active = data?.advanced?.active ?? false;
+    // Every role sees the stage of a run in progress; poll until the trace and the explanation are final.
+    const delay = data === null ? null : pollDelay(data);
 
     useEffect(() => {
-        if (!active) {
+        if (delay === null) {
             return;
         }
 
-        const timer = setInterval(load, 1500);
+        const timer = setInterval(load, delay);
 
         return () => clearInterval(timer);
-    }, [active, load]);
+    }, [delay, load]);
 
-    const trace = (reanalyze: boolean) =>
+    const explain = (again: boolean) =>
         router.post(
             WorkflowController.store.url({
                 project: projectId,
                 analysis: analysisId,
             }),
-            reanalyze ? { reanalyze: true } : {},
+            { again },
             { preserveScroll: true, preserveState: true, onSuccess: load },
         );
 
-    const advanced = data?.advanced ?? null;
-    const final =
-        advanced?.status === 'completed' || advanced?.status === 'partial';
-
     return (
         <div className="space-y-4">
-            <div className="flex flex-wrap items-start gap-3">
-                <Heading
-                    variant="small"
-                    title="Workflow"
-                    icon={Workflow}
-                    description="Services, models, jobs, events and resources this action reaches, followed in the code without running it."
-                />
-                {data?.canTrace && !active && (
-                    <Button
-                        variant={final ? 'outline' : 'default'}
-                        className="ml-auto"
-                        onClick={() => trace(final)}
-                    >
-                        {final ? 'Trace again' : 'Trace workflow'}
-                    </Button>
-                )}
-            </div>
+            <Heading
+                variant="small"
+                title="Workflow"
+                icon={Workflow}
+                description="Services, models, jobs, events and resources this action reaches, followed in the code without running it."
+            />
 
             {data === null && !failed && (
                 <p className="flex items-center gap-2 text-muted-foreground">
@@ -521,49 +613,14 @@ export default function WorkflowPanel({
                 </Alert>
             )}
 
-            {data && advanced === null && (
-                <p className="text-muted-foreground">
-                    {data.canTrace
-                        ? 'Not traced yet. Tracing follows every call from this action and adds its service, model, job and event relationships.'
-                        : 'Not traced yet. A Developer, Maintainer or Owner can trace the workflow.'}
-                </p>
-            )}
-
-            {active && (
-                <p className="flex items-center gap-2 text-muted-foreground">
-                    <Spinner /> Tracing… ({advanced?.status})
-                </p>
-            )}
-
-            {advanced?.status === 'failed' && (
-                <Alert variant="destructive">
-                    <AlertDescription>
-                        <p>
-                            {advanced.failureCode === 'analyzer_mismatch'
-                                ? 'The queue worker is running an older analyzer that cannot trace workflows, so its result was not saved. Restart the queue worker, then trace again.'
-                                : `Tracing failed (${advanced.failureCode ?? 'error'}). No partial result was saved.`}
-                        </p>
-                    </AlertDescription>
-                </Alert>
-            )}
-
-            {advanced?.stale && !active && (
-                <Alert variant="warning" role="note">
-                    <TriangleAlert aria-hidden="true" />
-                    <AlertDescription>
-                        This trace was made by an older analyzer version. Trace
-                        again for the current one.
-                    </AlertDescription>
-                </Alert>
-            )}
-
-            {data?.graph && final && (
-                <WorkflowView
-                    graph={data.graph}
+            {data && (
+                <WorkflowContent
+                    data={data}
                     basic={basic}
                     canViewSource={canViewSource}
                     query={query}
                     onQuery={setQuery}
+                    onExplain={explain}
                 />
             )}
         </div>

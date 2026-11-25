@@ -547,6 +547,8 @@ const PAIRS: Pair[] = [
     ).flatMap(([id, fg]) =>
         ['--page-from', '--page-to'].map((bg) => ({ id, fg, bg })),
     ),
+    // Revision 12c: the dark tooltip, --foreground text on the --border fill.
+    { id: 'P37', fg: '--foreground', bg: '--border' },
 ];
 
 function tokenRgb(decls: Record<string, string>, token: string) {
@@ -578,9 +580,35 @@ function pairRatio(pair: Pair, mode: Mode) {
 const NON_TEXT_PAIRS = ['P11', 'P12'];
 const floorOf = (pair: Pair) => (NON_TEXT_PAIRS.includes(pair.id) ? 3 : 4.5);
 
+// Revision 12c: the dark tooltip fill (--border) must stand apart from the page and the card.
+// The 1.3 floor is a planner-chosen guard: above --secondary (1.24 / 1.14), below --border (1.55 / 1.42).
+describe('AC5: dark --border separates from --background and --card (revision 12c)', () => {
+    it('P37 is in the table with light 10.88 and dark 10.33', () => {
+        const p37 = PAIRS.filter((p) => p.id === 'P37');
+
+        expect(p37).toEqual([
+            { id: 'P37', fg: '--foreground', bg: '--border' },
+        ]);
+        expect(pairRatio(p37[0], 'light')).toBeCloseTo(10.88, 1);
+        expect(pairRatio(p37[0], 'dark')).toBeCloseTo(10.33, 1);
+    });
+
+    it.each(['--background', '--card'])(
+        'luminance ratio of dark --border against %s is at least 1.3',
+        (surface) => {
+            const decls = declsFor('dark');
+            const border = luminance(tokenRgb(decls, '--border'));
+
+            expect(
+                ratio(border, luminance(tokenRgb(decls, surface))),
+            ).toBeGreaterThanOrEqual(1.3);
+        },
+    );
+});
+
 describe('AC5: WCAG contrast of every spec pair (4.5 text, 3 non-text P11/P12)', () => {
-    it('has the 36 spec pairs plus the P9 accent twin, with P11 and P12 as the only non-text pairs', () => {
-        expect(new Set(PAIRS.map((p) => p.id)).size).toBe(37);
+    it('has the 37 spec pairs plus the P9 accent twin, with P11 and P12 as the only non-text pairs', () => {
+        expect(new Set(PAIRS.map((p) => p.id)).size).toBe(38);
         expect(PAIRS.filter((p) => floorOf(p) === 3).map((p) => p.id)).toEqual([
             'P11',
             'P12',
@@ -1699,8 +1727,13 @@ describe('AC49: components/github-source.tsx', () => {
 // AC50 (revision 12b, gate-r12): green stays only on the primary button
 // ---------------------------------------------------------------------------
 
+// Revision 12f (C3b-F21): a token fails if it ends in -primary or -primary-foreground
+// (optional /opacity and trailing !, not sidebar-primary), or contains --primary or --color-primary.
+// Revision 12g rule (c) (C3b-F23): or contains theme(colors.primary (the legacy theme() dot path).
+// Known limit, accepted (C3b-F24, spec AC50): any word ending in -primary (e.g. "non-primary",
+// "make-primary") is flagged though it paints nothing. A fail-safe false red, not weakened.
 const PRIMARY_TOKEN =
-    /(?:^|:)(?:bg|text|border|fill|stroke|accent|ring|outline|from|via|to|decoration|caret|divide|shadow)-primary(?:-foreground)?(?:\/\d+)?!?$/;
+    /(?<!sidebar)-primary(?:-foreground)?(?:\/\S+)?!?$|--(?:color-)?primary|theme\(colors\.primary/;
 
 // The 17 files of the Contract table "Revision 12b class edits".
 const REV_12B_FILES = [
@@ -1733,6 +1766,26 @@ describe('AC50: green stays only on the primary button', () => {
         'data-[state=checked]:border-primary',
         'selection:text-primary-foreground',
         'accent-primary',
+        '!bg-primary',
+        'hover:!bg-primary',
+        'ring-offset-primary',
+        'bg-(--primary)',
+        'bg-[var(--primary)]',
+        'bg-[var(--color-primary)]',
+        '[color:var(--primary)]',
+        '[color:var(--color-primary)]',
+        'border-t-primary',
+        'border-x-primary',
+        'bg-primary/[0.5]',
+        'inset-ring-primary',
+        'inset-shadow-primary',
+        'placeholder-primary',
+        'drop-shadow-primary',
+        'text-shadow-primary',
+        'bg-[theme(colors.primary)]',
+        '[color:theme(colors.primary)]',
+        'bg-[color:theme(colors.primary)]',
+        'bg-[theme(colors.primary/50%)]',
     ])('the token regex matches %s', (t) => {
         expect(PRIMARY_TOKEN.test(t)).toBe(true);
     });
@@ -1741,6 +1794,11 @@ describe('AC50: green stays only on the primary button', () => {
         'data-[active=true]:before:bg-sidebar-primary',
         'bg-info',
         'text-sidebar-primary-foreground',
+        'bg-sidebar-primary/[0.5]',
+        'bg-(--sidebar-primary)',
+        '[color:var(--color-sidebar-primary)]',
+        'primary',
+        'bg-[theme(colors.sidebar-primary)]',
     ])('the token regex does not match %s', (t) => {
         expect(PRIMARY_TOKEN.test(t)).toBe(false);
     });

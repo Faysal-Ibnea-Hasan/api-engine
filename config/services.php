@@ -35,4 +35,15 @@ return [
         ],
     ],
 
+    // AI provider adapters (App\Domain\Ai). Keys live encrypted in ai_providers, never here.
+    // Base URLs are fixed and trusted on purpose: no env override.
+    'ai' => [
+        'connect_timeout' => 10,
+        'timeout' => 540, // < ExplainWorkflowJob::$timeout (600) < queue retry_after (1900)
+        'test_timeout' => 20,
+        'anthropic_url' => 'https://api.anthropic.com',
+        'openai_url' => 'https://api.openai.com',
+        'gemini_url' => 'https://generativelanguage.googleapis.com',
+    ],
+
 ];

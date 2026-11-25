@@ -86,13 +86,14 @@ export default function FrameworkDetectionCard({
                 <Badge
                     variant={
                         detection.status === 'detected'
-                            ? 'default'
+                            ? 'info'
                             : detection.status === 'partial'
                               ? 'secondary'
                               : 'destructive'
                     }
                 >
-                    {statusText[detection.status]}
+                    {Object.hasOwn(statusText, detection.status) &&
+                        statusText[detection.status]}
                 </Badge>
                 <span className="ml-auto">{runButton}</span>
             </div>
@@ -110,7 +111,7 @@ export default function FrameworkDetectionCard({
                             in {folder(root.path)}
                         </span>
                         {detection.selectedRoot === root.path && (
-                            <Badge>Selected root</Badge>
+                            <Badge variant="info">Selected root</Badge>
                         )}
                     </div>
                     <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-muted-foreground">

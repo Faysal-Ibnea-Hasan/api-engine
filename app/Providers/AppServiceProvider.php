@@ -86,6 +86,9 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('github-browse', fn (Request $r) => Limit::perMinute(60)->by($by('github-browse', $r)));
         RateLimiter::for('github-import', fn (Request $r) => Limit::perMinute(10)->by($by('github-import', $r)));
         RateLimiter::for('github-app-settings', fn (Request $r) => Limit::perMinute(20)->by($by('github-app-settings', $r)));
+        // Each click may start a paid AI run; the usage limit is the real spend control.
+        RateLimiter::for('workflow-explain', fn (Request $r) => Limit::perMinute(10)->by($by('workflow-explain', $r)));
+        RateLimiter::for('ai-settings', fn (Request $r) => Limit::perMinute(20)->by($by('ai-settings', $r)));
         RateLimiter::for('invitations', fn (Request $r) => Limit::perMinute(20)->by($by('invitations', $r)));
     }
 }

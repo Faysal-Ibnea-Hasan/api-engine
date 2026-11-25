@@ -6,6 +6,7 @@ use App\Domain\Analysis\Shape\Recorder;
 use App\Domain\Audit\AuditLog;
 use App\Domain\Projects\ProjectError;
 use App\Domain\Sources\RunStatus;
+use App\Events\EndpointAnalysisFinished;
 use App\Jobs\AnalyzeEndpointJob;
 use App\Models\AnalysisEvidence;
 use App\Models\AnalysisFinding;
@@ -186,8 +187,10 @@ final class EndpointAnalyses
 
     public function fail(string $analysisId, string $code): void
     {
-        EndpointAnalysis::query()->whereKey($analysisId)->whereIn('status', [RunStatus::Queued->value, RunStatus::Running->value])
+        $failed = EndpointAnalysis::query()->whereKey($analysisId)->whereIn('status', [RunStatus::Queued->value, RunStatus::Running->value])
             ->update(['status' => RunStatus::Failed->value, 'failure_code' => $code, 'claimed_at' => null, 'finished_at' => now(), 'updated_at' => now()]);
+
+        $failed === 1 && EndpointAnalysisFinished::dispatch($analysisId);
     }
 
     /** @param  array<string, mixed>  $result */
@@ -263,6 +266,8 @@ final class EndpointAnalyses
                 'finished_at' => now(),
                 'updated_at' => now(),
             ]);
+
+            EndpointAnalysisFinished::dispatch($analysis->id); // held until this transaction commits
         });
     }
 }

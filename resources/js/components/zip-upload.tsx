@@ -292,7 +292,7 @@ export default function ZipUpload({
     };
 
     return (
-        <div className="space-y-3 rounded-lg border bg-card p-4">
+        <div className="space-y-3 rounded-lg border bg-background/40 p-3">
             <label
                 onDragOver={(e) => {
                     e.preventDefault();
@@ -305,7 +305,7 @@ export default function ZipUpload({
                     choose(e.dataTransfer.files[0]);
                 }}
                 className={cn(
-                    'flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed p-6 text-center text-sm has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50',
+                    'flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-dashed p-4 text-center text-sm has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50',
                     dragging && 'border-info bg-muted/50',
                     busy && 'pointer-events-none opacity-60',
                 )}
@@ -350,12 +350,13 @@ export default function ZipUpload({
             <InputError message={error ?? undefined} />
 
             <div className="flex gap-2">
-                <Button onClick={upload} disabled={!file || busy}>
+                <Button size="sm" onClick={upload} disabled={!file || busy}>
                     {busy ? 'Uploading…' : 'Upload and import'}
                 </Button>
                 {busy && (
                     <Button
                         variant="ghost"
+                        size="sm"
                         onClick={() => (stopped.current = true)}
                     >
                         Pause

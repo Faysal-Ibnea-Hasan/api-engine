@@ -13,6 +13,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 Route::get('ready', ReadinessController::class)->middleware(['auth', 'can:platform-admin'])->name('ready');
 
 require __DIR__.'/settings.php';
+require __DIR__.'/ai.php';
 
 require __DIR__.'/workspaces.php';
 

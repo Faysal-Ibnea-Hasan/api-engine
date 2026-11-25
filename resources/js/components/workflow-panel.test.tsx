@@ -5,10 +5,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import WorkflowPanel, {
     filterRows,
+    liveExplanation,
+    pollDelay,
+    WorkflowContent,
     workflowRows,
     WorkflowView,
 } from '@/components/workflow-panel';
-import type { AnalysisResult, WorkflowGraph } from '@/types';
+import type { AnalysisResult, WorkflowData, WorkflowGraph } from '@/types';
 
 vi.mock('@inertiajs/react', async (orig) => ({
     ...(await orig<typeof import('@inertiajs/react')>()),
@@ -316,5 +319,185 @@ describe('Workflow tab', () => {
         for (const pattern of FORBIDDEN) {
             expect(html.replace(/<[^>]+>/g, ' ')).not.toMatch(pattern);
         }
+    });
+
+    it('puts the AI explanation first and folds the trace into closed trace details', () => {
+        const data: WorkflowData = {
+            advanced: {
+                id: 'adv',
+                status: 'completed',
+                active: false,
+                failureCode: null,
+                stale: false,
+                finishedAt: '2026-11-24T14:00:00+00:00',
+            },
+            canExplain: true,
+            graph,
+            ai: {
+                available: true,
+                reason: null,
+                provider: 'Anthropic',
+                model: 'claude-opus-5-5',
+                effort: 'medium',
+                left: null,
+                period: null,
+                settingsUrl: null,
+            },
+            explanation: null,
+        };
+        const html = renderToStaticMarkup(
+            <WorkflowContent
+                data={data}
+                basic={basic}
+                canViewSource
+                query=""
+                onQuery={() => {}}
+                onExplain={() => {}}
+            />,
+        );
+
+        expect(html).toMatch(
+            /<details(?![^>]*\bopen\b)[^>]*>\s*<summary[^>]*>Show trace details<\/summary>/,
+        );
+        expect(html.indexOf('Explain workflow with AI')).toBeLessThan(
+            html.indexOf('Show trace details'),
+        );
+        expect(html.indexOf('Show trace details')).toBeLessThan(
+            html.indexOf('Workflow trace'),
+        );
+        expect(html).not.toContain('Trace workflow');
+        expect(html).not.toContain('Trace again');
+        for (const pattern of FORBIDDEN) {
+            expect(
+                html
+                    .replace(/<[^>]+>/g, ' ')
+                    .replace(
+                        /\$this->\{\$action\}\(\)|\$this-&gt;\{\$action\}\(\)/g,
+                        '',
+                    ),
+            ).not.toMatch(pattern);
+        }
+
+        const hidden = renderToStaticMarkup(
+            <WorkflowContent
+                data={{
+                    ...data,
+                    canExplain: false,
+                    explanation: { hidden: true, stage: null },
+                }}
+                basic={basic}
+                canViewSource={false}
+                query=""
+                onQuery={() => {}}
+                onExplain={() => {}}
+            />,
+        );
+        expect(hidden).toContain(
+            'available to members who can read source code',
+        );
+        expect(hidden).toContain('Show trace details');
+    });
+
+    it('stops spinning and polling for a tracing row whose trace already finished, and offers the button that recovers it', () => {
+        const ai: WorkflowData['ai'] = {
+            available: true,
+            reason: null,
+            provider: 'Anthropic',
+            model: 'claude-opus-5-5',
+            effort: 'medium',
+            left: null,
+            period: null,
+            settingsUrl: null,
+        };
+        const advanced: NonNullable<WorkflowData['advanced']> = {
+            id: 'adv',
+            status: 'completed',
+            active: false,
+            failureCode: null,
+            stale: false,
+            finishedAt: '2026-11-24T14:00:00+00:00',
+        };
+        const tracing: WorkflowData['explanation'] = {
+            hidden: false,
+            status: 'tracing',
+            stage: 'tracing',
+            failureMessage: null,
+            retryable: false,
+            markdown: null,
+            html: null,
+            truncated: false,
+            omitted: [],
+            provider: 'Anthropic',
+            model: 'claude-opus-5-5',
+            promptVersion: null,
+            inputUnits: null,
+            outputUnits: null,
+            finishedAt: null,
+        };
+        const stuck: WorkflowData = {
+            advanced,
+            canExplain: true,
+            graph,
+            ai,
+            explanation: tracing,
+        };
+
+        // stage drives polling: null here, so the panel stops polling.
+        expect(liveExplanation(stuck)?.stage).toBeNull();
+        expect(pollDelay(stuck)).toBeNull();
+        expect(
+            pollDelay({
+                ...stuck,
+                explanation: { hidden: true, stage: 'writing' },
+            }),
+        ).toBe(5000);
+        expect(
+            liveExplanation({
+                ...stuck,
+                explanation: { hidden: true, stage: 'tracing' },
+            })?.stage,
+        ).toBeNull();
+        const html = renderToStaticMarkup(
+            <WorkflowContent
+                data={stuck}
+                basic={basic}
+                canViewSource
+                query=""
+                onQuery={() => {}}
+                onExplain={() => {}}
+            />,
+        );
+        expect(html).toContain('Explain workflow with AI');
+        expect(html).not.toContain('Tracing the code');
+
+        // While the trace runs, the row is live: spinner and polling.
+        const running = {
+            ...stuck,
+            advanced: { ...advanced, status: 'running' as const, active: true },
+        };
+        expect(liveExplanation(running)?.stage).toBe('tracing');
+        expect(pollDelay(running)).toBe(1500);
+        expect(
+            renderToStaticMarkup(
+                <WorkflowContent
+                    data={running}
+                    basic={basic}
+                    canViewSource
+                    query=""
+                    onQuery={() => {}}
+                    onExplain={() => {}}
+                />,
+            ),
+        ).toContain('Tracing the code…');
+        expect(
+            liveExplanation({
+                ...stuck,
+                explanation: {
+                    ...tracing,
+                    status: 'running',
+                    stage: 'writing',
+                },
+            })?.stage,
+        ).toBe('writing');
     });
 });

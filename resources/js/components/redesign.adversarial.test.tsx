@@ -395,9 +395,29 @@ const filesMatching = (re: RegExp) =>
 
 describe('Adversary chunk 1: no new HTML injection sinks', () => {
     it('dangerouslySetInnerHTML only in the 2FA setup modal', () => {
+        // Outside AI feature: workflow-explanation.tsx allowed at one sink, user "HTML sink: allow ... PINNED to safe mode" (ledger); pinned by the next row.
         expect(filesMatching(/dangerouslySetInnerHTML/)).toEqual([
             'components/two-factor-setup-modal.tsx',
+            'components/workflow-explanation.tsx',
         ]);
+        expect(
+            readRoot('resources/js/components/workflow-explanation.tsx').match(
+                /dangerouslySetInnerHTML/g,
+            ),
+        ).toHaveLength(1);
+    });
+
+    it('the workflow explanation html is Str::markdown with html_input strip and allow_unsafe_links false (pin)', () => {
+        const src = readRoot(
+            'app/Http/Controllers/Analysis/WorkflowController.php',
+        );
+        const opts = src.match(
+            /'html'\s*=>\s*[^,]*?\?\s*null\s*:\s*Str::markdown\(\s*\$explanation->markdown\s*,\s*\[([^\]]*)\]\s*\)/,
+        )?.[1];
+
+        expect(src.match(/'html'\s*=>/g)).toHaveLength(1);
+        expect(opts).toMatch(/'html_input'\s*=>\s*'strip'/);
+        expect(opts).toMatch(/'allow_unsafe_links'\s*=>\s*false\b/);
     });
 
     it('no innerHTML, insertAdjacentHTML, eval or document.write', () => {
@@ -2390,5 +2410,644 @@ describe('Adversary chunk 3b: settings layout and GitHub guide keep outside beha
 
         expect(alert).toContain('role="note"');
         expect(html).toContain('<strong>Safety:</strong>');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Chunk 3b fix loop 3 (gate C, Supervisor correction 5): the hero ring
+// override, AC50 regex misses, the dark tooltip merge and the detection-card
+// badges. Appended only: rows above keep their line numbers.
+
+/** Compiles app.css (minus @import/@source) with the real Tailwind compiler. */
+async function twCss(candidates: string[]) {
+    const { compile } = await import('tailwindcss');
+    const app = readRoot('resources/css/app.css').replace(
+        /^@(?:import|source)\b.*$/gm,
+        '',
+    );
+    const compiler = await compile(`@tailwind utilities;\n${app}`, {
+        loadStylesheet: async () => {
+            throw new Error('no @import expected');
+        },
+    });
+
+    return compiler.build(candidates);
+}
+
+const HERO_OVERRIDE = '[&_:focus-visible]:ring-ring!';
+const HERO_TOKENS = [
+    'bg-gradient-from',
+    'brand-gradient',
+    'text-gradient-foreground',
+    '[--color-ring:var(--gradient-foreground)]',
+    HERO_OVERRIDE,
+];
+
+describe('Adversary chunk 3b loop 3: hero focus-ring override', () => {
+    it('nested focusables (2+ levels deep, a link in a hero action, a caller ring color) all sit inside the overriding header (guard)', () => {
+        const hero = oneHero(
+            renderToStaticMarkup(
+                <Heading title="T" description="D" icon={FolderKanban}>
+                    <div>
+                        <div>
+                            <a href="/deep">deep link</a>
+                        </div>
+                    </div>
+                    <Button asChild variant="secondary">
+                        <a href="/action">action link</a>
+                    </Button>
+                    <Button
+                        variant="secondary"
+                        className="focus-visible:ring-destructive"
+                    >
+                        own ring
+                    </Button>
+                </Heading>,
+            ),
+        );
+
+        expect(tokensOfTag(hero.tag)).toEqual(
+            expect.arrayContaining(HERO_TOKENS),
+        );
+        expect(hero.body).toContain('<a href="/deep">deep link</a>');
+
+        const action = hero.body.match(/<a\b[^>]*href="\/action"[^>]*>/);
+        const own = hero.body.match(/<button\b[^>]*>own ring/);
+
+        expect(action).not.toBeNull();
+        expect(own).not.toBeNull();
+        // The override sets colour only; the width still comes from the kit.
+        expect(tokensOfTag(action![0])).toContain('focus-visible:ring-[3px]');
+        expect(tokensOfTag(own![0])).toEqual(
+            expect.arrayContaining([
+                'focus-visible:ring-[3px]',
+                'focus-visible:ring-destructive',
+            ]),
+        );
+    });
+
+    it('compiled CSS: the override is a descendant (any depth) !important rule that beats a caller ring colour (guard)', async () => {
+        const css = await twCss([
+            HERO_OVERRIDE,
+            '[--color-ring:var(--gradient-foreground)]',
+            'focus-visible:ring-destructive',
+            'focus-visible:ring-destructive!',
+        ]);
+        const hero = css.indexOf(
+            '.\\[\\&_\\:focus-visible\\]\\:ring-ring\\! :focus-visible {',
+        );
+        const plain = css.indexOf(
+            '.focus-visible\\:ring-destructive:focus-visible {',
+        );
+        const important = css.indexOf(
+            '.focus-visible\\:ring-destructive\\!:focus-visible {',
+        );
+
+        expect(hero, css).toBeGreaterThan(-1);
+        expect(css.slice(hero)).toMatch(
+            /^[^{]+\{\s*--tw-ring-color: var\(--color-ring\) !important;/,
+        );
+        expect(css.slice(plain)).toMatch(
+            /^[^{]+\{\s*--tw-ring-color: var\(--color-destructive\);/,
+        );
+        expect(css).toContain('--color-ring: var(--gradient-foreground);');
+        // Both !important with equal specificity (0,2,0): the later rule wins.
+        expect(important).toBeGreaterThan(-1);
+        expect(hero).toBeGreaterThan(important);
+    });
+
+    it('a caller className on Heading is ignored: the override and the gradient stay (guard)', () => {
+        const plain = oneHero(renderToStaticMarkup(<Heading title="T" />));
+        const hostile = oneHero(
+            renderToStaticMarkup(
+                <Heading
+                    {...({
+                        title: 'T',
+                        className:
+                            'bg-destructive ring-destructive [&_:focus-visible]:ring-destructive! [--color-ring:red]',
+                    } as ComponentProps<typeof Heading>)}
+                />,
+            ),
+        );
+
+        expect(hostile.tag).toBe(plain.tag);
+        expect(tokensOfTag(hostile.tag)).toEqual(
+            expect.arrayContaining(HERO_TOKENS),
+        );
+        expect(hostile.tag).not.toContain('destructive');
+    });
+
+    it.each([true, false])(
+        'compact=%s keeps the override, the gradient and the bg-gradient-from fallback (guard)',
+        (compact) => {
+            const hero = oneHero(
+                renderToStaticMarkup(
+                    <Heading
+                        title="T"
+                        description="D"
+                        icon={FolderKanban}
+                        compact={compact}
+                    >
+                        <Button variant="secondary">Act</Button>
+                    </Heading>,
+                ),
+            );
+            const t = tokensOfTag(hero.tag);
+
+            expect(t).toEqual(expect.arrayContaining(HERO_TOKENS));
+            expect(t.filter((x) => x.startsWith('bg-'))).toEqual([
+                'bg-gradient-from',
+            ]);
+            expect(t).not.toContain('bg-primary');
+        },
+    );
+});
+
+// AC50: the live PRIMARY_TOKEN regex and the var(--primary substring check,
+// read from design-system.test.ts so a later fix there turns these rows green.
+const AC50_SRC = readRoot('resources/js/design-system.test.ts');
+const AC50_RE = new RegExp(
+    AC50_SRC.match(/const PRIMARY_TOKEN =\s*\/(.+)\/;/)?.[1] ?? '(?!)',
+);
+const ac50Catches = (cls: string) =>
+    cls
+        .split(/[\s"'`]+/)
+        .filter(Boolean)
+        .some((t) => AC50_RE.test(t)) || cls.includes('var(--primary');
+const primaryRefs = (css: string) =>
+    css.match(/var\(--(?:color-)?primary\)/g)?.length ?? 0;
+
+const AC50_MISSES = [
+    '!bg-primary',
+    'hover:!bg-primary',
+    'ring-offset-primary',
+    'bg-(--primary)',
+    'bg-[var(--color-primary)]',
+    '[color:var(--color-primary)]',
+    'border-t-primary',
+    'border-x-primary',
+    'bg-primary/[0.5]',
+    'inset-ring-primary',
+    'inset-shadow-primary',
+    'placeholder-primary',
+    'drop-shadow-primary',
+    'text-shadow-primary',
+];
+
+describe('Adversary chunk 3b loop 3: AC50 scan misses', () => {
+    it('the model matches the live guard: regex extracted, substring check present (guard)', () => {
+        expect(AC50_RE.source).not.toBe('(?!)');
+        expect(AC50_SRC).toContain(".includes('var(--primary')");
+    });
+
+    it.each([
+        'bg-primary',
+        'outline-primary',
+        'bg-[var(--primary)]',
+        '[color:var(--primary)]',
+    ])('%s emits --primary and AC50 catches it (guard)', async (cls) => {
+        expect(primaryRefs(await twCss([cls]))).toBeGreaterThan(
+            primaryRefs(await twCss([])),
+        );
+        expect(ac50Catches(cls)).toBe(true);
+    });
+
+    it.each(AC50_MISSES)(
+        '%s emits --primary (green), so AC50 must catch it (minor)',
+        async (cls) => {
+            expect(primaryRefs(await twCss([cls]))).toBeGreaterThan(
+                primaryRefs(await twCss([])),
+            );
+            expect(ac50Catches(cls)).toBe(true);
+        },
+    );
+
+    it('no live non-test file in resources/js uses a missed form today (guard)', () => {
+        const hits = walk(JS_DIR).flatMap((f) => {
+            const text = fs.readFileSync(f, 'utf8');
+
+            return AC50_MISSES.filter((m) => text.includes(m)).map(
+                (m) => `${rel(f)}: ${m}`,
+            );
+        });
+
+        expect(hits).toEqual([]);
+    });
+});
+
+const TOOLTIP_SRC = readRoot('resources/js/components/ui/tooltip.tsx');
+const TOOLTIP_BASE =
+    TOOLTIP_SRC.match(/className=\{cn\(\s*"([^"]+)"/)?.[1] ?? '';
+const TOOLTIP_ARROW =
+    TOOLTIP_SRC.match(/<TooltipPrimitive\.Arrow className="([^"]+)"/)?.[1] ??
+    '';
+
+describe('Adversary chunk 3b loop 3: dark tooltip and a caller className', () => {
+    const merged = async (caller: string) => {
+        const { cn } = await import('@/lib/utils');
+
+        return cn(TOOLTIP_BASE, caller).split(' ');
+    };
+
+    it.each([
+        // caller, kept, dropped
+        [
+            'max-w-xs',
+            [
+                'bg-foreground',
+                'text-background',
+                'dark:bg-border',
+                'dark:text-foreground',
+            ],
+            [],
+        ],
+        [
+            'text-sm',
+            [
+                'bg-foreground',
+                'text-background',
+                'dark:bg-border',
+                'dark:text-foreground',
+            ],
+            ['text-xs'],
+        ],
+        [
+            'bg-red-500',
+            ['text-background', 'dark:bg-border', 'dark:text-foreground'],
+            ['bg-foreground'],
+        ],
+        [
+            'text-white',
+            ['bg-foreground', 'dark:bg-border', 'dark:text-foreground'],
+            ['text-background'],
+        ],
+        [
+            'bg-card text-card-foreground',
+            ['dark:bg-border', 'dark:text-foreground'],
+            ['bg-foreground', 'text-background'],
+        ],
+    ])(
+        'caller className="%s" keeps the dark tokens (guard)',
+        async (caller, kept, dropped) => {
+            const t = await merged(caller);
+
+            expect(TOOLTIP_BASE).not.toBe('');
+            expect(t).toEqual(expect.arrayContaining(kept));
+
+            for (const d of dropped) expect(t).not.toContain(d);
+        },
+    );
+
+    it('only an explicit dark: caller class replaces dark:bg-border (guard)', async () => {
+        const t = await merged('dark:bg-card');
+
+        expect(t).toContain('dark:bg-card');
+        expect(t).not.toContain('dark:bg-border');
+        expect(t).toEqual(
+            expect.arrayContaining([
+                'bg-foreground',
+                'text-background',
+                'dark:text-foreground',
+            ]),
+        );
+    });
+
+    it('compiled CSS: dark:bg-border (0,2,0) outranks a caller bg-* (0,1,0) in dark mode (guard)', async () => {
+        const css = await twCss(['dark:bg-border', 'dark:fill-border']);
+
+        expect(css).toMatch(
+            /\.dark\\:bg-border:is\(\.dark \*\) \{\s*background-color: var\(--color-border\);/,
+        );
+        expect(css).toMatch(
+            /\.dark\\:fill-border:is\(\.dark \*\) \{\s*fill: var\(--color-border\);/,
+        );
+    });
+
+    it('the Arrow is a literal (no caller className reaches it) with both light and dark tokens (guard)', () => {
+        expect(TOOLTIP_ARROW.split(' ')).toEqual(
+            expect.arrayContaining([
+                'bg-foreground',
+                'fill-foreground',
+                'dark:bg-border',
+                'dark:fill-border',
+            ]),
+        );
+        expect(TOOLTIP_SRC).not.toMatch(
+            /<TooltipPrimitive\.Arrow\b[^>]*className=\{/,
+        );
+    });
+});
+
+describe('Adversary chunk 3b loop 3: detection-card badge variants', () => {
+    const renderCard = async (status: string, selectedRoot = '.') => {
+        const { default: Card } =
+            await import('@/components/framework-detection-card');
+        type Detection = NonNullable<ComponentProps<typeof Card>['detection']>;
+        const detection = {
+            id: 'd1',
+            status: status as Detection['status'],
+            framework: 'laravel',
+            roots: [
+                {
+                    path: '.',
+                    declaredVersion: '^11.0',
+                    lockedVersion: '11.0.0',
+                    phpConstraint: '^8.2',
+                    routeLayout: 'bootstrap_app',
+                    routeFiles: null,
+                    routeFileCount: 1,
+                    modules: [],
+                    confidence: 'high',
+                    evidence: null,
+                },
+            ],
+            warnings: [],
+            hiddenWarningCount: 0,
+            selectedRoot,
+            selectionSource: 'auto',
+            selectedAt: null,
+            detectorVersion: '1',
+            outdated: false,
+            detectedAt: null,
+        } satisfies Detection;
+
+        const html = renderToStaticMarkup(
+            <Card
+                projectId="p1"
+                snapshotId="s1"
+                detection={detection}
+                canDetect={false}
+                canSelectRoot={false}
+            />,
+        );
+
+        return [
+            ...html.matchAll(/(<span\b[^>]*data-slot="badge"[^>]*>)([^<]*)/g),
+        ].map((m) => ({ t: tokensOfTag(m[1]), label: m[2] }));
+    };
+
+    const SOLID_DEFAULT = ['bg-info', 'text-info-foreground'];
+
+    it.each([
+        ['detected', 'bg-info/10', 'Laravel detected'],
+        ['partial', 'bg-secondary', 'Needs your input'],
+        ['unsupported', 'bg-destructive/10', 'Not supported'],
+        ['not_found', 'bg-destructive/10', 'No application found'],
+        ['failed', 'bg-destructive/10', ''],
+        ['something-new', 'bg-destructive/10', ''],
+        ['', 'bg-destructive/10', ''],
+        ['toString', 'bg-destructive/10', ''],
+        ['__proto__', 'bg-destructive/10', ''],
+    ])(
+        'status "%s" maps to %s, never the solid default, and does not crash',
+        async (status, bg, label) => {
+            const badges = await renderCard(status);
+            const statusBadge = badges[0];
+
+            expect(statusBadge.t).toContain(bg);
+            expect(statusBadge.label).toBe(label);
+
+            for (const b of badges) {
+                for (const s of SOLID_DEFAULT) expect(b.t).not.toContain(s);
+            }
+        },
+    );
+
+    it('"Selected root" is the info tint, and absent when the root does not match (guard)', async () => {
+        const on = (await renderCard('detected', '.')).filter(
+            (b) => b.label === 'Selected root',
+        );
+        const off = (await renderCard('detected', 'other')).filter(
+            (b) => b.label === 'Selected root',
+        );
+
+        expect(on).toHaveLength(1);
+        expect(on[0].t).toEqual(
+            expect.arrayContaining(['bg-info/10', 'text-info']),
+        );
+        expect(off).toEqual([]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Chunk 3b fix loop 4 (gate C): the revision 12f PRIMARY_TOKEN rule (false
+// positives and misses) and the status badge own-key lookup. Appended only.
+
+const ac50Hits = (text: string) =>
+    text
+        .split(/[\s"'`]+/)
+        .filter(Boolean)
+        .filter((t) => AC50_RE.test(t));
+const paintsPrimary = async (cls: string) =>
+    primaryRefs(await twCss([cls])) > primaryRefs(await twCss([]));
+
+describe('Adversary chunk 3b loop 4: AC50 rule false positives', () => {
+    it('over every non-test file in resources/js, only ui/button.tsx bg-primary and text-primary-foreground hit (guard)', () => {
+        const hits = walk(JS_DIR).flatMap((f) =>
+            [...new Set(ac50Hits(fs.readFileSync(f, 'utf8')))].map(
+                (t) => `${rel(f)}: ${t}`,
+            ),
+        );
+
+        expect(hits.sort()).toEqual([
+            'components/ui/button.tsx: bg-primary',
+            'components/ui/button.tsx: text-primary-foreground',
+        ]);
+    });
+
+    it('nav-main.tsx bg-sidebar-primary is not a hit (guard)', () => {
+        const text = readRoot('resources/js/components/nav-main.tsx');
+
+        expect(text).toContain('data-[active=true]:before:bg-sidebar-primary');
+        expect(ac50Hits(text)).toEqual([]);
+    });
+
+    it.each([
+        'bg-sidebar-primary',
+        'hover:bg-sidebar-primary/50!',
+        'text-sidebar-primary-foreground/80',
+        '!bg-sidebar-primary',
+        'primary',
+        'Primary',
+        'isPrimary',
+        'primaryKey',
+        'primary-key',
+        'variant="primary"',
+        '<p>Set as primary.</p>',
+        'non-primary.',
+        '(primary)',
+    ])('%s is not a hit (guard)', (text) => {
+        expect(ac50Hits(text)).toEqual([]);
+    });
+
+    // C3b-F24 accepted as a fail-safe limit, user "accept (2)", ledger 17:30, spec AC50 Known limit (:769).
+    it.each([
+        ['<p>Use a non-primary account</p>', 'non-primary'],
+        ['<li data-testid="make-primary" />', 'make-primary'],
+        ["const id = 'cta-primary';", 'cta-primary'],
+    ])(
+        '%s paints nothing, yet AC50 flags %s (documented expectation)',
+        async (text, word) => {
+            const words = text.split(/[\s"'`<>=/]+/).filter(Boolean);
+
+            for (const w of words) expect(await paintsPrimary(w)).toBe(false);
+
+            expect(ac50Hits(text)).toEqual([word]);
+        },
+    );
+});
+
+describe('Adversary chunk 3b loop 4: AC50 rule misses', () => {
+    it.each([
+        'stroke-primary',
+        'fill-primary',
+        'caret-primary',
+        'accent-primary',
+        'decoration-primary',
+        'from-primary',
+        'via-primary',
+        'to-primary',
+        'divide-primary',
+        'outline-primary/50',
+        'shadow-primary/20',
+        'ring-primary/[.3]',
+        'bg-primary/(--a)',
+        'bg-primary/50!',
+        'border-primary!',
+        'bg-[theme(--color-primary)]',
+    ])('%s emits --primary and AC50 catches it (guard)', async (cls) => {
+        expect(await paintsPrimary(cls)).toBe(true);
+        expect(ac50Catches(cls)).toBe(true);
+    });
+
+    it('bg-sidebar-primary emits no --primary (guard)', async () => {
+        expect(await paintsPrimary('bg-sidebar-primary')).toBe(false);
+    });
+
+    const THEME_MISSES = [
+        'bg-[theme(colors.primary)]',
+        '[color:theme(colors.primary)]',
+        'bg-[color:theme(colors.primary)]',
+        'bg-[theme(colors.primary/50%)]',
+    ];
+
+    it.each(THEME_MISSES)(
+        '%s emits --primary (green), so AC50 must catch it (minor)',
+        async (cls) => {
+            expect(await paintsPrimary(cls)).toBe(true);
+            expect(ac50Catches(cls)).toBe(true);
+        },
+    );
+
+    it('no live non-test file in resources/js uses theme(colors.primary today (guard)', () => {
+        const hits = walk(JS_DIR)
+            .filter((f) =>
+                fs.readFileSync(f, 'utf8').includes('theme(colors.primary'),
+            )
+            .map(rel);
+
+        expect(hits).toEqual([]);
+    });
+
+    it('no live non-test file builds a bg-/text- class from a template or concatenation (guard)', () => {
+        const hits = walk(JS_DIR).flatMap((f) =>
+            fs
+                .readFileSync(f, 'utf8')
+                .split('\n')
+                .flatMap((l, i) =>
+                    /\b(?:bg|text|border|ring|fill|stroke)-\$\{|['"`](?:bg|text|border|ring)-['"`]\s*\+/.test(
+                        l,
+                    )
+                        ? [`${rel(f)}:${i + 1}`]
+                        : [],
+                ),
+        );
+
+        expect(hits).toEqual([]);
+    });
+});
+
+describe('Adversary chunk 3b loop 4: status badge own-key lookup', () => {
+    const statusBadge = async (status: string) => {
+        const { default: Card } =
+            await import('@/components/framework-detection-card');
+        type Detection = NonNullable<ComponentProps<typeof Card>['detection']>;
+        const detection = {
+            id: 'd1',
+            status: status as Detection['status'],
+            framework: 'laravel',
+            roots: [],
+            warnings: [],
+            hiddenWarningCount: 0,
+            selectedRoot: null,
+            selectionSource: 'auto',
+            selectedAt: null,
+            detectorVersion: '1',
+            outdated: false,
+            detectedAt: null,
+        } satisfies Detection;
+        const html = renderToStaticMarkup(
+            <Card
+                projectId="p1"
+                snapshotId="s1"
+                detection={detection}
+                canDetect={false}
+                canSelectRoot={false}
+            />,
+        );
+        const m = html.match(
+            /(<span\b[^>]*data-slot="badge"[^>]*>)(.*?)<\/span>/,
+        );
+
+        expect(m, `no badge in: ${html}`).not.toBeNull();
+
+        return { t: tokensOfTag(m![1]), inner: m![2] };
+    };
+
+    it.each([
+        ['detected', 'bg-info/10', 'Laravel detected'],
+        ['partial', 'bg-secondary', 'Needs your input'],
+        ['unsupported', 'bg-destructive/10', 'Not supported'],
+        ['not_found', 'bg-destructive/10', 'No application found'],
+    ])(
+        'known status "%s" keeps %s and its label (guard)',
+        async (s, bg, label) => {
+            const b = await statusBadge(s);
+
+            expect(b.t).toContain(bg);
+            expect(b.inner).toBe(label);
+        },
+    );
+
+    it.each([
+        'constructor',
+        'hasOwnProperty',
+        'valueOf',
+        '__proto__',
+        'toString',
+        'isPrototypeOf',
+        '__defineGetter__',
+        '0',
+        '1e3',
+        '-1',
+        'NaN',
+    ])(
+        'status "%s" renders an empty destructive badge, no object or function (guard)',
+        async (s) => {
+            const b = await statusBadge(s);
+
+            expect(b.t).toContain('bg-destructive/10');
+            expect(b.inner).toBe('');
+        },
+    );
+
+    it('the own-key test reads statusText itself, not a copy (guard)', () => {
+        const text = readRoot(
+            'resources/js/components/framework-detection-card.tsx',
+        );
+
+        expect(text).toMatch(
+            /Object\.hasOwn\(statusText, detection\.status\) &&\s*statusText\[detection\.status\]/,
+        );
     });
 });

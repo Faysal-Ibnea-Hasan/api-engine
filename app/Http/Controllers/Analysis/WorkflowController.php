@@ -2,35 +2,47 @@
 
 namespace App\Http\Controllers\Analysis;
 
+use App\Domain\Ai\AiError;
+use App\Domain\Ai\AiGate;
+use App\Domain\Ai\AiUsage;
+use App\Domain\Ai\WorkflowExplanations;
 use App\Domain\Analysis\EndpointAnalyses;
+use App\Domain\Projects\ProjectError;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Analysis\TraceWorkflowRequest;
+use App\Models\AiProvider;
+use App\Models\AiRun;
 use App\Models\AnalysisEvidence;
 use App\Models\ApiDependency;
 use App\Models\EndpointAnalysis;
 use App\Models\Project;
+use App\Models\WorkflowExplanation;
+use App\Support\Features;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 /**
- * The workflow graph (P10) of the endpoint behind an analysis. Both routes take the analysis the
+ * The workflow graph (P10) and its AI explanation for the endpoint behind an analysis. Both routes take the analysis the
  * endpoint page shows (basic) and work on its advanced sibling: a separate row and fingerprint, so
  * a basic result is never replaced or flagged stale by tracing.
  */
 class WorkflowController extends Controller
 {
-    /** Start (or rerun) the advanced analysis of this analysis's endpoint. */
-    public function store(TraceWorkflowRequest $request, Project $project, EndpointAnalysis $analysis, EndpointAnalyses $analyses): RedirectResponse
+    /** Trace then explain with AI (spec § 6.5a). An AiError (AI not ready, limit used up) goes back with an error toast. */
+    public function store(TraceWorkflowRequest $request, Project $project, EndpointAnalysis $analysis, WorkflowExplanations $explanations): RedirectResponse
     {
-        $endpoint = $analysis->endpoint;
-        abort_if($endpoint === null, 404);
+        abort_if($analysis->endpoint === null, 404);
+        // Before the AI gate: an archived project never starts a paid run, whatever the AI state.
+        if ($project->isArchived()) {
+            throw ProjectError::archived();
+        }
 
-        $reanalyze = $request->boolean('reanalyze');
-        $analyses->start($request->user(), $endpoint, $reanalyze, EndpointAnalyses::ADVANCED);
-        Inertia::flash('toast', ['type' => 'info', 'message' => $reanalyze ? __('Workflow tracing started again.') : __('Workflow tracing started.')]);
+        $explanations->request($request->user(), $analysis, $request->boolean('again'));
+        Inertia::flash('toast', ['type' => 'info', 'message' => __('Explaining the workflow…')]);
 
         return back();
     }
@@ -75,8 +87,86 @@ class WorkflowController extends Controller
                 'stale' => EndpointAnalyses::isStale($advanced),
                 'finishedAt' => $advanced->finished_at?->toIso8601String(),
             ],
-            'canTrace' => $request->user()->can('analyze', $project) && ! $project->isArchived() && $analysis->endpoint !== null,
+            'canExplain' => $request->user()->can('analyze', $project) && ! $project->isArchived() && $analysis->endpoint !== null,
             'graph' => $graph,
+            'ai' => self::ai(),
+            'explanation' => self::explanation($advanced, $withSource),
         ]);
+    }
+
+    /** @return array<string, mixed> */
+    private static function ai(): array
+    {
+        $gate = AiGate::check();
+        $provider = $gate['provider'];
+        $meter = $provider === null ? null : AiUsage::meter($provider);
+
+        return [
+            'available' => $gate['available'],
+            'reason' => $gate['reason'],
+            'provider' => $provider === null ? null : (AiProvider::PROVIDERS[$provider->provider] ?? $provider->provider),
+            'model' => $provider?->model,
+            'effort' => $provider?->effort,
+            'left' => $meter['left'] ?? null,
+            'period' => ($meter['left'] ?? null) === null ? null : $provider?->limit_period,
+            // The settings page only exists with the flag on.
+            'settingsUrl' => Gate::allows('platform-admin') && Features::enabled('ai_settings') ? route('ai-settings.edit') : null,
+        ];
+    }
+
+    /**
+     * Only for roles that may read source: the explanation was written from it (spec § 6.8). Others get just
+     * the stage of a run in progress, which every role sees (spec § 6.5a).
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function explanation(?EndpointAnalysis $advanced, bool $withSource): ?array
+    {
+        $explanation = $advanced === null ? null : WorkflowExplanation::query()->where('endpoint_analysis_id', $advanced->id)->first();
+        $stage = match ($explanation?->status) {
+            'tracing' => 'tracing',
+            'queued', 'running' => 'writing',
+            default => null,
+        };
+        if (! $withSource) {
+            return ['hidden' => true, 'stage' => $stage];
+        }
+        if ($explanation === null) {
+            return null;
+        }
+        $failure = $explanation->failure_code === null ? null : AiError::of($explanation->failure_code);
+        $run = $explanation->ai_run_id === null ? null : AiRun::query()->find($explanation->ai_run_id);
+
+        return [
+            'hidden' => false,
+            'status' => $explanation->status,
+            'stage' => $stage,
+            'failureMessage' => $failure?->getMessage(),
+            'retryable' => $failure?->retryable() ?? false,
+            'markdown' => $explanation->markdown,
+            'html' => self::withoutBeacons($explanation->markdown === null ? null : Str::markdown($explanation->markdown, ['html_input' => 'strip', 'allow_unsafe_links' => false])),
+            'truncated' => $explanation->truncated,
+            'omitted' => $explanation->omitted ?? [],
+            'provider' => $explanation->provider === null ? null : (AiProvider::PROVIDERS[$explanation->provider] ?? $explanation->provider),
+            'model' => $explanation->model,
+            'promptVersion' => $explanation->prompt_version,
+            'inputUnits' => $run?->input_tokens,
+            'outputUnits' => $run?->output_tokens,
+            'finishedAt' => $explanation->finished_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * The AI Markdown's HTML, whose raw HTML was stripped: every tag left is CommonMark's own with escaped attributes. Images
+     * become their alt text (a remote image is a beacon a prompt injection could fill with data), links get a safe rel.
+     */
+    private static function withoutBeacons(?string $html): ?string
+    {
+        if ($html === null) {
+            return null;
+        }
+        $html = (string) preg_replace_callback('/<img\b[^>]*>/', fn (array $m) => preg_match('/\balt="([^"]*)"/', $m[0], $alt) === 1 ? $alt[1] : '', $html);
+
+        return (string) preg_replace('/<a\b([^>]*)>/', '<a$1 rel="noopener noreferrer nofollow">', $html);
     }
 }

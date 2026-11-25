@@ -105,9 +105,39 @@ export default function SourcePanel({
     }, [active, failureMessage, projectId, runId, runStatus]);
 
     return (
-        <section className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-2">
+        <section className="flex flex-col gap-3 rounded-lg border bg-card p-3">
+            <div className="flex flex-wrap items-center gap-2 border-b pb-3">
                 <Heading variant="small" title="Source" icon={Upload} />
+                {github && (
+                    <div
+                        role="tablist"
+                        aria-label="Source method"
+                        className="inline-flex gap-1 rounded-lg bg-muted p-1"
+                    >
+                        {(
+                            [
+                                ['zip', 'ZIP upload'],
+                                ['github', 'GitHub repository'],
+                            ] as const
+                        ).map(([value, label]) => (
+                            <button
+                                key={value}
+                                type="button"
+                                role="tab"
+                                aria-selected={method === value}
+                                onClick={() => setMethod(value)}
+                                className={cn(
+                                    'rounded-md px-3 py-1.5 text-sm transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                                    method === value
+                                        ? 'bg-background shadow-xs'
+                                        : 'text-muted-foreground hover:text-foreground',
+                                )}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                )}
                 {sources.canImportFixture && !active && (
                     <Button
                         variant="outline"
@@ -127,37 +157,6 @@ export default function SourcePanel({
                     </Button>
                 )}
             </div>
-
-            {github && (
-                <div
-                    role="tablist"
-                    aria-label="Source method"
-                    className="inline-flex w-fit gap-1 rounded-lg bg-muted p-1"
-                >
-                    {(
-                        [
-                            ['zip', 'ZIP upload'],
-                            ['github', 'GitHub repository'],
-                        ] as const
-                    ).map(([value, label]) => (
-                        <button
-                            key={value}
-                            type="button"
-                            role="tab"
-                            aria-selected={method === value}
-                            onClick={() => setMethod(value)}
-                            className={cn(
-                                'rounded-md px-3 py-1.5 text-sm transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                                method === value
-                                    ? 'bg-background shadow-xs'
-                                    : 'text-muted-foreground hover:text-foreground',
-                            )}
-                        >
-                            {label}
-                        </button>
-                    ))}
-                </div>
-            )}
 
             {github && method === 'github' && (
                 <GitHubSource
@@ -251,76 +250,88 @@ export default function SourcePanel({
                 />
             )}
 
-            {sources.rootCandidates.length > 0 && (
-                <p className="text-sm text-muted-foreground">
-                    Laravel app found in{' '}
-                    {sources.rootCandidates.map((dir, i) => (
-                        <span key={dir}>
-                            {i > 0 && ', '}
-                            <code>
-                                {dir === '.' ? '(archive root)' : `${dir}/`}
-                            </code>
-                        </span>
-                    ))}
-                    .
-                </p>
-            )}
-
-            {sources.snapshots.length === 0 ? (
-                <EmptyState
-                    icon={Upload}
-                    title="No source imported yet"
-                    description={
-                        github
-                            ? 'Upload a ZIP or import a GitHub repository above to create the first snapshot.'
-                            : sourcePreference === 'git'
-                              ? 'Git import arrives in a later release. Your preference is saved; no credentials are stored.'
-                              : sources.canUpload
-                                ? 'Upload a ZIP above to create the first snapshot.'
-                                : 'Ask someone who can manage this project to upload a ZIP.'
-                    }
-                />
-            ) : (
-                <ul className="divide-y rounded-lg border bg-card">
-                    {sources.snapshots.map((snapshot) => (
-                        <li key={snapshot.id}>
-                            <Link
-                                href={SnapshotController.show({
-                                    project: projectId,
-                                    snapshot: snapshot.id,
-                                })}
-                                className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm transition-[color,background-color,box-shadow] outline-none hover:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset"
-                            >
-                                <ImportStatus status={snapshot.status} />
-                                <span className="capitalize">
-                                    {snapshot.sourceType}
-                                </span>
-                                {snapshot.sha256 && (
-                                    <code
-                                        className="font-mono text-code text-muted-foreground"
-                                        title={snapshot.sha256}
-                                    >
-                                        {snapshot.sha256.slice(0, 12)}
+            <div className="space-y-2 border-t pt-3">
+                <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-medium">Import history</p>
+                    <span className="text-sm text-muted-foreground">
+                        {sources.snapshots.length}{' '}
+                        {sources.snapshots.length === 1
+                            ? 'snapshot'
+                            : 'snapshots'}
+                    </span>
+                    {sources.rootCandidates.length > 0 && (
+                        <p className="ml-auto text-sm text-muted-foreground">
+                            Laravel app:{' '}
+                            {sources.rootCandidates.map((dir, i) => (
+                                <span key={dir}>
+                                    {i > 0 && ', '}
+                                    <code>
+                                        {dir === '.'
+                                            ? '(archive root)'
+                                            : `${dir}/`}
                                     </code>
-                                )}
-                                {snapshot.status === 'ready' && (
-                                    <span className="text-muted-foreground">
-                                        {snapshot.fileCount} files ·{' '}
-                                        {formatBytes(snapshot.totalBytes)}
-                                    </span>
-                                )}
-                                <span className="ml-auto text-muted-foreground">
-                                    {new Date(
-                                        snapshot.readyAt ??
-                                            snapshot.createdAt ??
-                                            '',
-                                    ).toLocaleString()}
                                 </span>
-                            </Link>
-                        </li>
-                    ))}
-                </ul>
-            )}
+                            ))}
+                        </p>
+                    )}
+                </div>
+
+                {sources.snapshots.length === 0 ? (
+                    <EmptyState
+                        icon={Upload}
+                        title="No source imported yet"
+                        description={
+                            github
+                                ? 'Upload a ZIP or import a GitHub repository above to create the first snapshot.'
+                                : sourcePreference === 'git'
+                                  ? 'Git import arrives in a later release. Your preference is saved; no credentials are stored.'
+                                  : sources.canUpload
+                                    ? 'Upload a ZIP above to create the first snapshot.'
+                                    : 'Ask someone who can manage this project to upload a ZIP.'
+                        }
+                    />
+                ) : (
+                    <ul className="divide-y rounded-lg border bg-background/40">
+                        {sources.snapshots.map((snapshot) => (
+                            <li key={snapshot.id}>
+                                <Link
+                                    href={SnapshotController.show({
+                                        project: projectId,
+                                        snapshot: snapshot.id,
+                                    })}
+                                    className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm transition-[color,background-color,box-shadow] outline-none hover:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset"
+                                >
+                                    <ImportStatus status={snapshot.status} />
+                                    <span className="capitalize">
+                                        {snapshot.sourceType}
+                                    </span>
+                                    {snapshot.sha256 && (
+                                        <code
+                                            className="font-mono text-code text-muted-foreground"
+                                            title={snapshot.sha256}
+                                        >
+                                            {snapshot.sha256.slice(0, 12)}
+                                        </code>
+                                    )}
+                                    {snapshot.status === 'ready' && (
+                                        <span className="text-muted-foreground">
+                                            {snapshot.fileCount} files ·{' '}
+                                            {formatBytes(snapshot.totalBytes)}
+                                        </span>
+                                    )}
+                                    <span className="ml-auto text-muted-foreground">
+                                        {new Date(
+                                            snapshot.readyAt ??
+                                                snapshot.createdAt ??
+                                                '',
+                                        ).toLocaleString()}
+                                    </span>
+                                </Link>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
         </section>
     );
 }

@@ -24,6 +24,6 @@ class TraceWorkflowRequest extends FormRequest
      */
     public function rules(): array
     {
-        return ['reanalyze' => ['sometimes', 'boolean']];
+        return ['again' => ['sometimes', 'boolean']];
     }
 }

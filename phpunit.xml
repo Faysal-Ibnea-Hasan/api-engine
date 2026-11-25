@@ -43,5 +43,6 @@
         <env name="FEATURE_STATIC_DOCS" value="false"/>
         <env name="FEATURE_GIT_IMPORT" value="false"/>
         <env name="FEATURE_ADVANCED_ANALYSIS" value="false"/>
+        <env name="FEATURE_AI_SETTINGS" value="false"/>
     </php>
 </phpunit>

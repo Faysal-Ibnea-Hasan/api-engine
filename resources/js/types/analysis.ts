@@ -211,8 +211,50 @@ export type WorkflowData = {
         stale: boolean;
         finishedAt: string | null;
     } | null;
-    canTrace: boolean;
+    canExplain: boolean;
     graph: WorkflowGraph | null;
+    ai: WorkflowAi;
+    explanation: WorkflowExplanation | null;
+};
+
+/** The default AI provider as the Workflow tab sees it; never the key. */
+export type WorkflowAi = {
+    available: boolean;
+    reason: string | null;
+    provider: string | null;
+    model: string | null;
+    effort: string | null;
+    /** null when the provider has no limit */
+    left: number | null;
+    period: 'day' | 'month' | null;
+    /** platform admins only */
+    settingsUrl: string | null;
+};
+
+export type WorkflowExplanationStage = 'tracing' | 'writing' | null;
+
+/** Roles that may not read source get only the stage of a run in progress. */
+export type WorkflowExplanation =
+    | { hidden: true; stage: WorkflowExplanationStage }
+    | WorkflowExplanationDocument;
+
+export type WorkflowExplanationDocument = {
+    hidden: false;
+    status: 'tracing' | 'queued' | 'running' | 'completed' | 'failed';
+    stage: WorkflowExplanationStage;
+    failureMessage: string | null;
+    retryable: boolean;
+    markdown: string | null;
+    /** sanitised server-side */
+    html: string | null;
+    truncated: boolean;
+    omitted: string[];
+    provider: string | null;
+    model: string | null;
+    promptVersion: string | null;
+    inputUnits: number | null;
+    outputUnits: number | null;
+    finishedAt: string | null;
 };
 
 /** exact = stated by the code; example = typed by the code, value is runtime data; unread = structure not read */
